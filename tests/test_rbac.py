@@ -134,8 +134,14 @@ def test_developer_has_debug_and_day_two_operations(perms):
     assert can(dev, "", "pods/ephemeralcontainers", "patch")
     assert can(dev, "", "pods", "delete")
     assert can(dev, "batch", "jobs", "create")
-    assert can(dev, "external-secrets.io", "externalsecrets", "patch")
+    # patch cannot be limited to the force-sync annotation, so developers do not get it
+    assert not can(dev, "external-secrets.io", "externalsecrets", "patch")
     assert not can(dev, "apps", "deployments", "patch")
+
+
+def test_force_sync_is_editor_and_admin_only(perms):
+    for profile in ("tenant-editor", "tenant-admin"):
+        assert can(perms[profile], "external-secrets.io", "externalsecrets", "patch"), profile
 
 
 def test_editor_can_operate_a_namespace_but_not_its_security(perms):

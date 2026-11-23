@@ -45,7 +45,7 @@ This is what stops one tenant reaching another's credentials or namespaces.
 6. **`tenant-rbac-guard`**: Argo CD applies team manifests with its own cluster-wide rights, so in tenant namespaces RoleBindings may only bind a Role to ServiceAccounts in the same namespace, and Roles may not use wildcards, bind, escalate, impersonate or create tokens, grant anything in platform-only API groups, or grant writes to the kinds the AppProject keeps out (so a repo cannot hand its own ServiceAccount what Argo CD would refuse). Human access comes only from `access:` in `tenant.yaml`.
 7. **`restrict-cluster-secret-store`**: in tenant namespaces only Kyverno and ESO may create ExternalSecrets that use a ClusterSecretStore (checked in `secretStoreRef`, `data[].sourceRef` and `dataFrom[].sourceRef`). An update that leaves `spec` unchanged, such as a force-sync annotation, is allowed. Teams can bring their own namespaced SecretStore.
 8. **`tenant-service-guard`**: no ExternalName Services and no `spec.externalIPs` (CVE-2020-8554) in tenant namespaces, and VirtualService routes, mirrors and delegates may only target the tenant's own namespaces, so a tenant cannot point the shared gateway at another tenant's Service or intercept traffic to an arbitrary IP. HTTPRoutes need a ReferenceGrant from the target namespace to cross namespaces, and tenants cannot create those.
-9. **`tenant-hosts-<tenant>`** (rendered by the tenant chart): Ingresses, HTTPRoutes, GRPCRoutes, VirtualServices and Certificates in a tenant's namespaces may only claim hostnames on that tenant's `hostnames:` list in tenant.yaml. VirtualService hosts and Certificate names may also be the tenant's own Services, never another tenant's, and Gateway routes must list hostnames. So no tenant can take another's hostname at the shared gateway, or capture another tenant's Service traffic across the mesh (VirtualServices are exported mesh-wide by default). CI checks that no two tenants list overlapping hostnames.
+9. **`tenant-hosts-<tenant>`** (rendered by the tenant chart): Ingresses, HTTPRoutes, GRPCRoutes, VirtualServices and Certificates in a tenant's namespaces may only claim hostnames on that tenant's `hostnames:` list in tenant.yaml. VirtualService hosts and Certificate names may also be the tenant's own Services, never another tenant's. Catch-alls are refused: Ingresses need a host on every rule and no defaultBackend, Gateway routes must list hostnames, and Certificates may not use literalSubject. So no tenant can take another's hostname at the shared gateway, or capture another tenant's Service traffic across the mesh (VirtualServices are exported mesh-wide by default). CI checks that no two tenants list overlapping hostnames.
 10. **Vault policy for ESO is read-only** and never covers `kv/users/`, so a PushSecret through `platform-vault` cannot overwrite anyone's credential and nothing in the cluster can read personal secrets.
 
 Kyverno's own settings (for example restricting PolicyExceptions to the `kyverno` namespace) are managed with the Kyverno installation, not here.
@@ -58,9 +58,9 @@ Kyverno's own settings (for example restricting PolicyExceptions to the `kyverno
 | `platform-operator` | cluster | `platform-operators` group | Read everything except secrets, cordon and drain nodes, delete pods. For on-call. |
 | `cluster-auditor` | cluster | `cluster-auditors` group | Read everything except secrets, including RBAC, Kyverno policies and policy reports. |
 | `tenant-viewer` | namespace | `access:` in tenant.yaml | Read workloads, config maps, logs, events, policy reports, certificates, monitors. No secrets, no exec. |
-| `tenant-developer` | namespace | `access:` in tenant.yaml | Viewer plus exec, attach, port-forward, `kubectl debug`, delete and evict pods, run Jobs (including from CronJobs), force-sync ExternalSecrets. |
+| `tenant-developer` | namespace | `access:` in tenant.yaml | Viewer plus exec, attach, port-forward, `kubectl debug`, delete and evict pods, run Jobs (including from CronJobs). |
 | `tenant-editor` | namespace | `access:` in tenant.yaml | Developer plus create, change and delete Deployments, StatefulSets, Services, ConfigMaps, PVCs, ServiceAccounts, Jobs, CronJobs, HPAs, PDBs, Ingresses, HTTP/GRPCRoutes, VirtualServices, DestinationRules, ExternalSecrets, Certificates and Prometheus monitors and rules; scale, restart and roll back. **Never bound in production namespaces.** |
-| `tenant-admin` | namespace | `access:` in tenant.yaml | Developer plus read Secrets, manage SecretStores, NetworkPolicies and Istio AuthorizationPolicies. No direct workload changes, because it is bound in production. |
+| `tenant-admin` | namespace | `access:` in tenant.yaml | Developer plus read Secrets, force-sync ExternalSecrets, manage SecretStores, NetworkPolicies and Istio AuthorizationPolicies. No direct workload changes, because it is bound in production. |
 
 `tenant-admin` is not a superset of `tenant-editor`: give a lead group both, editor for
 the non-production namespaces and admin everywhere (see the example below).
@@ -229,7 +229,7 @@ All of this is a platform-team pull request.
 5. If `registry.enabled: true`: `OIDC_MOUNT_ACCESSOR=... ./vault/onboard-tenant.sh <tenant> <idp-group>`, then the team writes their own robot credential:
    `vault kv put kv/tenants/<tenant>/registry registry=quay.example.com username='<org>+puller' password=...`
 
-Rotating a credential is just `vault kv put` again; ESO refreshes hourly (or annotate the ExternalSecret with `force-sync=$(date +%s)` to do it now; tenant-developer and above can).
+Rotating a credential is just `vault kv put` again; ESO refreshes hourly (or annotate the ExternalSecret with `force-sync=$(date +%s)` to do it now; tenant-editor and tenant-admin can, because RBAC cannot limit a patch to that annotation).
 
 ## Application file format
 

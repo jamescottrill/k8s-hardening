@@ -88,5 +88,5 @@ results:
     result: pass
   - policy: tenant-hosts-myapp
     rule: hostnames-owned-by-tenant
-    resources: [ing-steal, ing-suffix-trick, route-catch-all, vs-hijack-host, vs-wildcard-host, cert-steal]
+    resources: [ing-steal, ing-suffix-trick, ing-hostless, ing-default-backend, route-catch-all, route-empty-hostnames, vs-hijack-host, vs-wildcard-host, cert-steal, cert-literal]
     result: fail

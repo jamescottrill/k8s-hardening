@@ -50,26 +50,35 @@ spec:
                 '^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.' + {{ $name | squote }}
                   + '(-[a-z0-9]([-a-z0-9]*[a-z0-9])?)?(\\.svc(\\.cluster\\.local)?)?$'
           expressions:
+            # A rule without a host, or a defaultBackend, catches every hostname on the
+            # ingress controller, including other tenants'.
             - expression: >-
                 object.kind != 'Ingress'
-                || ((!has(object.spec.rules) || object.spec.rules.all(r, !has(r.host) || {{ include "tenant.ownedHost" "r.host" }}))
+                || (!has(object.spec.defaultBackend)
+                    && has(object.spec.rules) && size(object.spec.rules) > 0
+                    && object.spec.rules.all(r, has(r.host) && {{ include "tenant.ownedHost" "r.host" }})
                     && (!has(object.spec.tls) || object.spec.tls.all(t, !has(t.hosts) || t.hosts.all(h, {{ include "tenant.ownedHost" "h" }}))))
               message: >-
-                Ingress hosts must be on tenant {{ $name }}'s hostnames list in tenant.yaml.
+                Ingresses need at least one rule, a host on every rule, no defaultBackend, and every
+                host on tenant {{ $name }}'s hostnames list in tenant.yaml.
             - expression: >-
                 !(object.kind in ['HTTPRoute', 'GRPCRoute'])
-                || (has(object.spec.hostnames) && object.spec.hostnames.all(h, {{ include "tenant.ownedHost" "h" }}))
+                || (has(object.spec.hostnames) && size(object.spec.hostnames) > 0
+                    && object.spec.hostnames.all(h, {{ include "tenant.ownedHost" "h" }}))
                 || (has(object.spec.parentRefs) && object.spec.parentRefs.all(p, has(p.kind) && p.kind == 'Service'))
               message: >-
                 Routes attached to a Gateway must list hostnames, all on tenant {{ $name }}'s hostnames
                 list in tenant.yaml (a route without hostnames would take every hostname on the listener).
             - expression: >-
                 object.kind != 'VirtualService'
-                || (has(object.spec.hosts) && object.spec.hosts.all(h, h != '*'
+                || (has(object.spec.hosts) && size(object.spec.hosts) > 0 && object.spec.hosts.all(h, h != '*'
                     && (!h.contains('.') || h.matches(variables.internalPattern) || {{ include "tenant.ownedHost" "h" }})))
               message: >-
                 VirtualService hosts must be this tenant's own Services (a short name or
                 <svc>.<tenant namespace>) or on tenant {{ $name }}'s hostnames list in tenant.yaml.
+            # literalSubject sets the subject verbatim (including CN), bypassing the checks below.
+            - expression: "object.kind != 'Certificate' || !has(object.spec.literalSubject)"
+              message: Certificates in tenant namespaces may not use literalSubject; use dnsNames.
             - expression: >-
                 object.kind != 'Certificate'
                 || ((!has(object.spec.dnsNames) || object.spec.dnsNames.all(h,

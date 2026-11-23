@@ -3,7 +3,7 @@
 #
 #   tenant-viewer     read workloads, config, logs, events, policy reports. No secrets.
 #   tenant-developer  viewer + debug and day-2: exec, attach, port-forward, kubectl debug,
-#                     delete and evict pods, run Jobs, force-sync ExternalSecrets.
+#                     delete and evict pods, run Jobs.
 #   tenant-editor     developer + create, change and delete workloads and their config
 #                     directly. Never bound in production namespaces (see the tenant chart).
 #   tenant-admin      developer + read Secrets, manage SecretStores, NetworkPolicies and
@@ -53,7 +53,7 @@ metadata:
   annotations:
     platform.example.com/description: >-
       tenant-viewer plus exec, attach, port-forward, debug containers, delete and evict
-      pods, run Jobs and force-sync ExternalSecrets. Can read Secrets indirectly.
+      pods and run Jobs. Can read Secrets indirectly.
 aggregationRule:
   clusterRoleSelectors:
     - matchLabels:
@@ -182,10 +182,6 @@ rules:
 - apiGroups: [batch]
   resources: [jobs]
   verbs: [create, delete]
-# Force-sync an ExternalSecret (annotate force-sync=<timestamp>)
-- apiGroups: [external-secrets.io]
-  resources: [externalsecrets]
-  verbs: [patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -227,9 +223,10 @@ rules:
   verbs: [create, update, patch, delete]
 # Only ExternalSecrets against the namespace's own SecretStores:
 # restrict-cluster-secret-store refuses ClusterSecretStore references.
+# patch also covers force-sync (annotate force-sync=<timestamp>).
 - apiGroups: [external-secrets.io]
   resources: [externalsecrets]
-  verbs: [create, update, delete]
+  verbs: [create, update, patch, delete]
 # The ClusterIssuer's own policy (for Vault PKI, the role's allowed_domains) decides
 # which names a tenant can get certificates for.
 - apiGroups: [cert-manager.io]
@@ -249,6 +246,12 @@ rules:
 - apiGroups: ['']
   resources: [secrets]
   verbs: [get, list, watch]
+# Force-sync an ExternalSecret (annotate force-sync=<timestamp>). RBAC cannot limit a
+# patch to annotations, so this also lets admin change the ExternalSecret's spec;
+# restrict-cluster-secret-store still refuses ClusterSecretStore references.
+- apiGroups: [external-secrets.io]
+  resources: [externalsecrets]
+  verbs: [patch]
 # Bring-your-own SecretStore (for example a team's own Vault mount)
 - apiGroups: [external-secrets.io]
   resources: [secretstores]

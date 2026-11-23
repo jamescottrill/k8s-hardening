@@ -233,3 +233,31 @@ spec:
   secretName: steal-tls
   dnsNames: [api.teamb.example.com]
   issuerRef: {kind: ClusterIssuer, name: vault}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ing-hostless, namespace: myapp-dev}
+spec:
+  rules: [{http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}]}}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ing-default-backend, namespace: myapp-dev}
+spec:
+  defaultBackend: {service: {name: web, port: {number: 80}}}
+  rules: [{host: myapp.example.com}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-empty-hostnames, namespace: myapp-dev}
+spec:
+  parentRefs: [{name: shared, namespace: istio-system}]
+  hostnames: []
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: cert-literal, namespace: myapp-dev}
+spec:
+  secretName: steal-tls
+  literalSubject: CN=api.teamb.example.com
+  issuerRef: {kind: ClusterIssuer, name: vault}
