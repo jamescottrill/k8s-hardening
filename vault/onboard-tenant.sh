@@ -11,10 +11,24 @@ GROUP="${2:?IdP group name, e.g. myapp-developers}"
 : "${OIDC_MOUNT_ACCESSOR:?set OIDC_MOUNT_ACCESSOR}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
+# The name is substituted into a Vault policy path, where * and + are globs: an
+# unchecked name could grant access to every tenant. Same rule as the tenant chart.
+if [[ ! "${TENANT}" =~ ^[a-z][a-z0-9]{1,30}$ ]]; then
+  echo "tenant name '${TENANT}' must be 2-31 lowercase letters and digits, no hyphens" >&2
+  exit 1
+fi
+if [[ ! "${GROUP}" =~ ^[A-Za-z0-9._:/-]+$ ]]; then
+  echo "group name '${GROUP}' contains unexpected characters" >&2
+  exit 1
+fi
+
 sed "s/TENANT/${TENANT}/g" "${HERE}/tenant-writer.hcl.tpl" | vault policy write "tenant-${TENANT}-writer" -
 
-GROUP_ID="$(vault write -field=id identity/group \
-  name="tenant-${TENANT}" type=external policies="tenant-${TENANT}-writer")"
+# Re-runnable: writing an existing group by name updates it and returns no id, so read
+# the id back by name.
+vault write identity/group \
+  name="tenant-${TENANT}" type=external policies="tenant-${TENANT}-writer" >/dev/null
+GROUP_ID="$(vault read -field=id "identity/group/name/tenant-${TENANT}")"
 
 vault write identity/group-alias \
   name="${GROUP}" mount_accessor="${OIDC_MOUNT_ACCESSOR}" canonical_id="${GROUP_ID}" >/dev/null

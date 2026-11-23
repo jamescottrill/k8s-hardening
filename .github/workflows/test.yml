@@ -1,0 +1,39 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          version: v4.3.2
+      - run: pip install -r requirements-test.txt
+      - run: python -m pytest -v tests
+
+  kyverno:
+    runs-on: ubuntu-latest
+    env:
+      # Keep in step with the Kyverno version running on the cluster. v1.20 no longer
+      # runs kyverno.io/v1 ClusterPolicies, so these policies need migrating first.
+      KYVERNO_CLI: ghcr.io/kyverno/kyverno-cli:v1.16.1
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: docker run --rm -v "$PWD:/repo:ro" -w /repo "$KYVERNO_CLI" test tests/kyverno
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: shellcheck vault/*.sh

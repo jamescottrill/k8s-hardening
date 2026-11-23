@@ -1,0 +1,37 @@
+# Platform owned. Renders charts/tenant for myapp: the myapp AppProject and the Kyverno
+# policy that generates myapp's RoleBindings from tenant.yaml access:.
+# The name parameter is the tenant name and must equal this directory's name.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenant-myapp
+  namespace: argocd
+  labels:
+    platform.example.com/tenant: myapp
+  annotations:
+    # Before the tenant's workload Applications, which need the AppProject.
+    argocd.argoproj.io/sync-wave: "-1"
+    # Kyverno defaults fields on ClusterPolicies; server-side diff avoids false OutOfSync.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/example-org/platform-gitops.git
+    targetRevision: main
+    path: charts/tenant
+    helm:
+      valueFiles:
+        - ../../tenants/myapp/tenant.yaml
+      parameters:
+        # Parameters win over value files, so tenant.yaml cannot rename the tenant.
+        - name: name
+          value: myapp
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

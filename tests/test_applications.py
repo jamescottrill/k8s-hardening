@@ -1,0 +1,102 @@
+"""Static checks on the hand-written tenant Applications under tenants/<t>/applications/.
+
+tenant-application-guard (Kyverno) enforces the security-relevant rules on the cluster;
+these tests give the same answer in CI before merge, and also check things Kyverno
+cannot see, such as tenant.yaml's registry.enabled and sourceRepos.
+"""
+
+import fnmatch
+import re
+
+import pytest
+import yaml
+
+from conftest import REPO, TENANTS, load_docs, tenant_names
+
+TENANT_NAME = re.compile(r"^[a-z][a-z0-9]{1,30}$")
+IN_CLUSTER = "https://kubernetes.default.svc"
+
+
+def _chart_defaults():
+    with open(REPO / "charts/tenant/values.yaml", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
+
+
+def _tenant_values(tenant):
+    with open(TENANTS / tenant / "tenant.yaml", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
+
+
+def _applications():
+    for tenant in tenant_names():
+        for path in sorted((TENANTS / tenant / "applications").glob("*.yaml")):
+            for doc in load_docs(path):
+                yield tenant, path, doc
+
+
+APPS = list(_applications())
+IDS = [f"{t}/{p.name}" for t, p, _ in APPS]
+
+
+@pytest.mark.parametrize("tenant", tenant_names())
+def test_tenant_directory_layout(tenant):
+    assert TENANT_NAME.match(tenant), f"{tenant}: tenant names are lowercase letters and digits only"
+    assert (TENANTS / tenant / "tenant.yaml").is_file()
+    assert (TENANTS / tenant / "applications" / "tenant.yaml").is_file()
+
+
+@pytest.mark.parametrize("tenant,path,app", APPS, ids=IDS)
+def test_application_basics(tenant, path, app):
+    assert app["apiVersion"] == "argoproj.io/v1alpha1"
+    assert app["kind"] == "Application"
+    assert app["metadata"]["namespace"] == "argocd"
+    assert app["metadata"]["labels"]["platform.example.com/tenant"] == tenant
+
+
+@pytest.mark.parametrize("tenant,path,app", APPS, ids=IDS)
+def test_chart_or_workload_application(tenant, path, app):
+    spec = app["spec"]
+    if path.name == "tenant.yaml":
+        # The chart Application: platform project, name parameter = directory name.
+        assert app["metadata"]["name"] == f"tenant-{tenant}"
+        assert spec["project"] == "platform"
+        assert spec["source"]["path"] == "charts/tenant"
+        params = {p["name"]: p["value"] for p in spec["source"]["helm"]["parameters"]}
+        assert params["name"] == tenant
+        assert spec["source"]["helm"]["valueFiles"] == [f"../../tenants/{tenant}/tenant.yaml"]
+        return
+
+    values = _tenant_values(tenant)
+    assert spec["project"] == tenant
+    assert app["metadata"]["name"].startswith(f"{tenant}-")
+    assert spec["destination"] == {"server": IN_CLUSTER, "namespace": spec["destination"]["namespace"]}
+    namespace = spec["destination"]["namespace"]
+    assert namespace == tenant or namespace.startswith(f"{tenant}-")
+    # The AppProject would refuse the sync otherwise; fail in CI instead.
+    assert spec["source"]["repoURL"] in values["sourceRepos"]
+
+    sync = spec["syncPolicy"]
+    assert "CreateNamespace=true" in sync["syncOptions"]
+    labels = sync["managedNamespaceMetadata"]["labels"]
+    assert labels["platform.example.com/tenant"] == tenant
+    assert labels["platform.example.com/tenant-registry"] == str(values["registry"]["enabled"]).lower()
+    for mode in ("enforce", "audit", "warn"):
+        assert labels[f"pod-security.kubernetes.io/{mode}"] == "restricted"
+
+
+@pytest.mark.parametrize("tenant,path,app", APPS, ids=IDS)
+def test_production_is_self_healing(tenant, path, app):
+    """Production namespaces only change through Git, so selfHeal must be on there."""
+    if path.name == "tenant.yaml":
+        return
+    values = _tenant_values(tenant)
+    patterns = values.get("productionNamespaces", _chart_defaults()["productionNamespaces"])
+    patterns = [p.replace("TENANT", tenant) for p in patterns]
+    namespace = app["spec"]["destination"]["namespace"]
+    if any(fnmatch.fnmatchcase(namespace, p) for p in patterns):
+        assert app["spec"]["syncPolicy"]["automated"]["selfHeal"] is True
+
+
+def test_application_names_are_unique():
+    names = [app["metadata"]["name"] for _, _, app in APPS]
+    assert len(names) == len(set(names))

@@ -1,0 +1,44 @@
+# Platform owned. Production pins a release tag rather than tracking main.
+#
+# tenant-application-guard (Kyverno) refuses this Application unless project, name,
+# destination and namespace labels all match tenant myapp. Copy this file to add an app.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp-web-prod
+  namespace: argocd
+  labels:
+    platform.example.com/tenant: myapp
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: myapp
+  source:
+    repoURL: https://github.com/example-org/myapp-web.git
+    path: deploy/chart
+    targetRevision: v1.4.2
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: myapp-prod
+  syncPolicy:
+    automated:
+      prune: true
+      # Git is the only way to change production.
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    managedNamespaceMetadata:
+      labels:
+        platform.example.com/tenant: myapp
+        # Must match registry.enabled in tenants/myapp/tenant.yaml
+        platform.example.com/tenant-registry: "true"
+        # CIS 5.2.1: built-in Pod Security Admission alongside Kyverno
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/enforce-version: latest
+        pod-security.kubernetes.io/audit: restricted
+        pod-security.kubernetes.io/warn: restricted

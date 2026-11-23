@@ -1,0 +1,122 @@
+# A core add-on in a listed non-tenant project is left alone.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata: {name: core-cert-manager, namespace: argocd}
+spec:
+  project: default
+  source: {repoURL: https://charts.jetstack.io, chart: cert-manager, targetRevision: v1.19.1}
+  destination: {server: https://kubernetes.default.svc, namespace: cert-manager}
+---
+# An unlisted project is treated as a tenant and refused (fails safe).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata: {name: core-unlisted, namespace: argocd}
+spec:
+  project: core
+  source: {repoURL: https://charts.jetstack.io, chart: cert-manager, targetRevision: v1.19.1}
+  destination: {server: https://kubernetes.default.svc, namespace: cert-manager}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp-steal
+  namespace: argocd
+  labels: {platform.example.com/tenant: myapp}
+spec:
+  project: myapp
+  source: {repoURL: https://github.com/example-org/myapp-web.git, path: ., targetRevision: main}
+  destination: {server: https://kubernetes.default.svc, namespace: teamb-api}
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]
+    managedNamespaceMetadata:
+      labels: {platform.example.com/tenant: myapp, platform.example.com/tenant-registry: "true", pod-security.kubernetes.io/enforce: restricted}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp-mislabel
+  namespace: argocd
+  labels: {platform.example.com/tenant: myapp}
+spec:
+  project: myapp
+  source: {repoURL: https://github.com/example-org/myapp-web.git, path: ., targetRevision: main}
+  destination: {server: https://kubernetes.default.svc, namespace: myapp-x}
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]
+    managedNamespaceMetadata:
+      labels: {platform.example.com/tenant: teamb, platform.example.com/tenant-registry: "true", pod-security.kubernetes.io/enforce: restricted}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp-nolabels
+  namespace: argocd
+  labels: {platform.example.com/tenant: myapp}
+spec:
+  project: myapp
+  source: {repoURL: https://github.com/example-org/myapp-web.git, path: ., targetRevision: main}
+  destination: {server: https://kubernetes.default.svc, namespace: myapp-x}
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp-privileged
+  namespace: argocd
+  labels: {platform.example.com/tenant: myapp}
+spec:
+  project: myapp
+  source: {repoURL: https://github.com/example-org/myapp-web.git, path: ., targetRevision: main}
+  destination: {server: https://kubernetes.default.svc, namespace: myapp-x}
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]
+    managedNamespaceMetadata:
+      labels: {platform.example.com/tenant: myapp, platform.example.com/tenant-registry: "true", pod-security.kubernetes.io/enforce: privileged}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp-remote
+  namespace: argocd
+  labels: {platform.example.com/tenant: myapp}
+spec:
+  project: myapp
+  source: {repoURL: https://github.com/example-org/myapp-web.git, path: ., targetRevision: main}
+  destination: {server: https://other-cluster:6443, namespace: myapp-x}
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]
+    managedNamespaceMetadata:
+      labels: {platform.example.com/tenant: myapp, platform.example.com/tenant-registry: "true", pod-security.kubernetes.io/enforce: restricted}
+---
+# Label says myapp but project is teamb
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: teamb-wrongproject
+  namespace: argocd
+  labels: {platform.example.com/tenant: myapp}
+spec:
+  project: teamb
+  source: {repoURL: https://github.com/example-org/teamb-api.git, path: ., targetRevision: main}
+  destination: {server: https://kubernetes.default.svc, namespace: teamb-api}
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]
+    managedNamespaceMetadata:
+      labels: {platform.example.com/tenant: teamb, platform.example.com/tenant-registry: "false", pod-security.kubernetes.io/enforce: restricted}
+---
+# Name does not start with the tenant
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web
+  namespace: argocd
+  labels: {platform.example.com/tenant: myapp}
+spec:
+  project: myapp
+  source: {repoURL: https://github.com/example-org/myapp-web.git, path: ., targetRevision: main}
+  destination: {server: https://kubernetes.default.svc, namespace: myapp-x}
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]
+    managedNamespaceMetadata:
+      labels: {platform.example.com/tenant: myapp, platform.example.com/tenant-registry: "true", pod-security.kubernetes.io/enforce: restricted}

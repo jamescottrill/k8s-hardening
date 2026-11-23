@@ -1,0 +1,9 @@
+# Platform owned (CODEOWNERS). The tenant name is the directory name: teamb.
+owners:
+  groups:
+    - teamb-developers
+sourceRepos:
+  - https://github.com/example-org/teamb-api.git
+registry:
+  # teamb only pulls from the shared platform registry
+  enabled: false

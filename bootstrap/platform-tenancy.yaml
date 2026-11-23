@@ -17,7 +17,7 @@ spec:
     targetRevision: main
     path: platform
     # Plain directory source: Argo CD does no templating here, so the {{ }} in the
-    # ApplicationSets, Kyverno policies and ESO templates reach the cluster untouched.
+    # Kyverno policies and ESO templates reach the cluster untouched.
     directory:
       recurse: true
   destination:

@@ -1,6 +1,6 @@
 # Applied once by hand (kubectl apply -f bootstrap/), then Argo CD manages everything else.
 # The platform project is the only project allowed to create cluster-scoped resources,
-# AppProjects and ApplicationSets.
+# AppProjects and tenant Applications.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:

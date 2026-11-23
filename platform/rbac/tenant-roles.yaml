@@ -1,7 +1,34 @@
-# Namespace-scoped user profiles. Bound per tenant namespace by the Kyverno policy the
-# tenant chart renders from tenant.yaml access:. No wildcards (CIS 5.1.3), no secrets
-# below tenant-admin (CIS 5.1.2), no pod create (CIS 5.1.4), no bind/escalate (CIS 5.1.8).
-# Workloads change through Git and Argo CD, so these roles are read-heavy by design.
+# Namespace-scoped user profiles for tenant groups. Each profile is bound per tenant
+# namespace by the Kyverno policy the tenant chart renders from tenant.yaml access:.
+#
+#   tenant-viewer     read workloads, config, logs, events, policy reports. No secrets.
+#   tenant-developer  viewer + debug and day-2: exec, attach, port-forward, kubectl debug,
+#                     delete and evict pods, run Jobs, force-sync ExternalSecrets.
+#   tenant-editor     developer + create, change and delete workloads and their config
+#                     directly. Never bound in production namespaces (see the tenant chart).
+#   tenant-admin      developer + read Secrets, manage SecretStores, NetworkPolicies and
+#                     Istio security policy. Not a superset of tenant-editor: admin is
+#                     bound in production, where workloads only change through Git. Give
+#                     a lead group tenant-editor in non-production namespaces as well.
+#
+# How the profiles are built: the four rule sets below (read, debug, edit, admin) carry
+# aggregate-to-<profile> labels, and each profile is an aggregated ClusterRole that picks
+# up every rule set labelled for it (viewer = read; developer = read + debug;
+# editor = developer + edit; admin = developer + admin), with no copied rules to drift
+# apart. Only the platform project can create
+# ClusterRoles, so nothing else can add rules to a profile.
+#
+# Secret access, stated plainly: tenant-developer and above can create Jobs, exec into
+# pods and add debug containers, and tenant-editor can create Deployments. Any of those
+# can mount or print a Secret in the namespace, so treat developer, editor and admin as
+# able to read the namespace's Secrets. Only tenant-viewer cannot. None of the profiles
+# can create bare Pods, Roles, RoleBindings, Endpoints, EndpointSlices or DaemonSets, or
+# grant themselves more access.
+#
+# No wildcards (CIS 5.1.3), no bind/escalate/impersonate (CIS 5.1.8), no ServiceAccount
+# token creation (CIS 5.1.13).
+
+# --- Profiles -------------------------------------------------------------------------
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -9,53 +36,11 @@ metadata:
   labels:
     platform.example.com/rbac-profile: tenant-viewer
   annotations:
-    platform.example.com/description: Read workloads, logs, events and policy reports. No secrets, no exec.
-rules:
-- apiGroups: ['']
-  resources: [pods, pods/log, services, endpoints, configmaps, persistentvolumeclaims, events, serviceaccounts, replicationcontrollers, resourcequotas, limitranges]
-  verbs: [get, list, watch]
-- apiGroups: [apps]
-  resources: [deployments, replicasets, statefulsets, daemonsets, controllerrevisions]
-  verbs: [get, list, watch]
-- apiGroups: [batch]
-  resources: [jobs, cronjobs]
-  verbs: [get, list, watch]
-- apiGroups: [autoscaling]
-  resources: [horizontalpodautoscalers]
-  verbs: [get, list, watch]
-- apiGroups: [policy]
-  resources: [poddisruptionbudgets]
-  verbs: [get, list, watch]
-- apiGroups: [networking.k8s.io]
-  resources: [networkpolicies, ingresses]
-  verbs: [get, list, watch]
-- apiGroups: [discovery.k8s.io]
-  resources: [endpointslices]
-  verbs: [get, list, watch]
-- apiGroups: [events.k8s.io]
-  resources: [events]
-  verbs: [get, list, watch]
-- apiGroups: [metrics.k8s.io]
-  resources: [pods]
-  verbs: [get, list, watch]
-- apiGroups: [external-secrets.io]
-  resources: [externalsecrets, secretstores]
-  verbs: [get, list, watch]
-- apiGroups: [networking.istio.io]
-  resources: [virtualservices, destinationrules, serviceentries, sidecars]
-  verbs: [get, list, watch]
-- apiGroups: [security.istio.io]
-  resources: [authorizationpolicies, peerauthentications, requestauthentications]
-  verbs: [get, list, watch]
-- apiGroups: [gateway.networking.k8s.io]
-  resources: [httproutes, grpcroutes, referencegrants]
-  verbs: [get, list, watch]
-- apiGroups: [wgpolicyk8s.io]
-  resources: [policyreports]
-  verbs: [get, list, watch]
-- apiGroups: [rbac.authorization.k8s.io]
-  resources: [roles, rolebindings]
-  verbs: [get, list, watch]
+    platform.example.com/description: Read workloads, config, logs, events and policy reports. No secrets, no exec.
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.platform.example.com/aggregate-to-tenant-viewer: "true"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -64,62 +49,28 @@ metadata:
   labels:
     platform.example.com/rbac-profile: tenant-developer
   annotations:
-    platform.example.com/description: tenant-viewer plus exec, port-forward, delete pods and run jobs.
-rules:
-- apiGroups: ['']
-  resources: [pods, pods/log, services, endpoints, configmaps, persistentvolumeclaims, events, serviceaccounts, replicationcontrollers, resourcequotas, limitranges]
-  verbs: [get, list, watch]
-- apiGroups: [apps]
-  resources: [deployments, replicasets, statefulsets, daemonsets, controllerrevisions]
-  verbs: [get, list, watch]
-- apiGroups: [batch]
-  resources: [jobs, cronjobs]
-  verbs: [get, list, watch]
-- apiGroups: [autoscaling]
-  resources: [horizontalpodautoscalers]
-  verbs: [get, list, watch]
-- apiGroups: [policy]
-  resources: [poddisruptionbudgets]
-  verbs: [get, list, watch]
-- apiGroups: [networking.k8s.io]
-  resources: [networkpolicies, ingresses]
-  verbs: [get, list, watch]
-- apiGroups: [discovery.k8s.io]
-  resources: [endpointslices]
-  verbs: [get, list, watch]
-- apiGroups: [events.k8s.io]
-  resources: [events]
-  verbs: [get, list, watch]
-- apiGroups: [metrics.k8s.io]
-  resources: [pods]
-  verbs: [get, list, watch]
-- apiGroups: [external-secrets.io]
-  resources: [externalsecrets, secretstores]
-  verbs: [get, list, watch]
-- apiGroups: [networking.istio.io]
-  resources: [virtualservices, destinationrules, serviceentries, sidecars]
-  verbs: [get, list, watch]
-- apiGroups: [security.istio.io]
-  resources: [authorizationpolicies, peerauthentications, requestauthentications]
-  verbs: [get, list, watch]
-- apiGroups: [gateway.networking.k8s.io]
-  resources: [httproutes, grpcroutes, referencegrants]
-  verbs: [get, list, watch]
-- apiGroups: [wgpolicyk8s.io]
-  resources: [policyreports]
-  verbs: [get, list, watch]
-- apiGroups: [rbac.authorization.k8s.io]
-  resources: [roles, rolebindings]
-  verbs: [get, list, watch]
-- apiGroups: ['']
-  resources: [pods]
-  verbs: [delete]
-- apiGroups: ['']
-  resources: [pods/exec, pods/portforward]
-  verbs: [create, get]
-- apiGroups: [batch]
-  resources: [jobs]
-  verbs: [create, delete]
+    platform.example.com/description: >-
+      tenant-viewer plus exec, attach, port-forward, debug containers, delete and evict
+      pods, run Jobs and force-sync ExternalSecrets. Can read Secrets indirectly.
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.platform.example.com/aggregate-to-tenant-developer: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tenant-editor
+  labels:
+    platform.example.com/rbac-profile: tenant-editor
+  annotations:
+    platform.example.com/description: >-
+      tenant-developer plus create, change and delete workloads, Services, ConfigMaps,
+      routes, ExternalSecrets and autoscaling. For non-production namespaces.
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.platform.example.com/aggregate-to-tenant-editor: "true"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -128,7 +79,25 @@ metadata:
   labels:
     platform.example.com/rbac-profile: tenant-admin
   annotations:
-    platform.example.com/description: tenant-developer plus read secrets, scale, evict and force-sync ExternalSecrets.
+    platform.example.com/description: >-
+      tenant-developer plus read Secrets, manage SecretStores, NetworkPolicies and Istio
+      security policy. No direct workload changes.
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        rbac.platform.example.com/aggregate-to-tenant-admin: "true"
+
+# --- Rule sets ------------------------------------------------------------------------
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tenant-rules-read
+  labels:
+    rbac.platform.example.com/aggregate-to-tenant-viewer: "true"
+    rbac.platform.example.com/aggregate-to-tenant-developer: "true"
+    rbac.platform.example.com/aggregate-to-tenant-editor: "true"
+    rbac.platform.example.com/aggregate-to-tenant-admin: "true"
 rules:
 - apiGroups: ['']
   resources: [pods, pods/log, services, endpoints, configmaps, persistentvolumeclaims, events, serviceaccounts, replicationcontrollers, resourcequotas, limitranges]
@@ -160,6 +129,12 @@ rules:
 - apiGroups: [external-secrets.io]
   resources: [externalsecrets, secretstores]
   verbs: [get, list, watch]
+- apiGroups: [cert-manager.io]
+  resources: [certificates, certificaterequests, issuers]
+  verbs: [get, list, watch]
+- apiGroups: [monitoring.coreos.com]
+  resources: [servicemonitors, podmonitors, prometheusrules]
+  verbs: [get, list, watch]
 - apiGroups: [networking.istio.io]
   resources: [virtualservices, destinationrules, serviceentries, sidecars]
   verbs: [get, list, watch]
@@ -175,24 +150,112 @@ rules:
 - apiGroups: [rbac.authorization.k8s.io]
   resources: [roles, rolebindings]
   verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tenant-rules-debug
+  labels:
+    rbac.platform.example.com/aggregate-to-tenant-developer: "true"
+    rbac.platform.example.com/aggregate-to-tenant-editor: "true"
+    rbac.platform.example.com/aggregate-to-tenant-admin: "true"
+rules:
+# Restart a stuck pod (its controller recreates it)
 - apiGroups: ['']
   resources: [pods]
   verbs: [delete]
+# kubectl exec, attach, port-forward
 - apiGroups: ['']
-  resources: [pods/exec, pods/portforward]
+  resources: [pods/exec, pods/attach, pods/portforward]
   verbs: [create, get]
-- apiGroups: [batch]
-  resources: [jobs]
-  verbs: [create, delete]
+# kubectl debug (ephemeral containers; Pod Security restricted still applies to them)
 - apiGroups: ['']
-  resources: [secrets]
-  verbs: [get, list, watch]
+  resources: [pods/ephemeralcontainers]
+  verbs: [update, patch]
+# kubectl drain-style eviction that respects PodDisruptionBudgets
 - apiGroups: ['']
   resources: [pods/eviction]
   verbs: [create]
-- apiGroups: [apps]
-  resources: [deployments/scale, statefulsets/scale]
-  verbs: [get, update, patch]
+# One-off and CronJob-triggered Jobs (kubectl create job --from=cronjob/...)
+- apiGroups: [batch]
+  resources: [jobs]
+  verbs: [create, delete]
+# Force-sync an ExternalSecret (annotate force-sync=<timestamp>)
 - apiGroups: [external-secrets.io]
   resources: [externalsecrets]
   verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tenant-rules-edit
+  labels:
+    rbac.platform.example.com/aggregate-to-tenant-editor: "true"
+rules:
+# Deliberately absent: pods (create through a controller), endpoints and endpointslices
+# (could point a Service at another tenant's pods), secrets (ESO writes them), daemonsets,
+# roles and rolebindings, networkpolicies, resourcequotas and limitranges.
+- apiGroups: ['']
+  resources: [configmaps, services, persistentvolumeclaims, serviceaccounts]
+  verbs: [create, update, patch, delete]
+- apiGroups: [apps]
+  resources: [deployments, statefulsets]
+  verbs: [create, update, patch, delete]
+# kubectl scale (rollout restart and rollout undo patch the Deployment itself)
+- apiGroups: [apps]
+  resources: [deployments/scale, statefulsets/scale]
+  verbs: [get, update, patch]
+- apiGroups: [batch]
+  resources: [jobs, cronjobs]
+  verbs: [create, update, patch, delete]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  verbs: [create, update, patch, delete]
+- apiGroups: [policy]
+  resources: [poddisruptionbudgets]
+  verbs: [create, update, patch, delete]
+- apiGroups: [networking.k8s.io]
+  resources: [ingresses]
+  verbs: [create, update, patch, delete]
+- apiGroups: [gateway.networking.k8s.io]
+  resources: [httproutes, grpcroutes]
+  verbs: [create, update, patch, delete]
+- apiGroups: [networking.istio.io]
+  resources: [virtualservices, destinationrules]
+  verbs: [create, update, patch, delete]
+# Only ExternalSecrets against the namespace's own SecretStores:
+# restrict-cluster-secret-store refuses ClusterSecretStore references.
+- apiGroups: [external-secrets.io]
+  resources: [externalsecrets]
+  verbs: [create, update, delete]
+# The ClusterIssuer's own policy (for Vault PKI, the role's allowed_domains) decides
+# which names a tenant can get certificates for.
+- apiGroups: [cert-manager.io]
+  resources: [certificates]
+  verbs: [create, update, patch, delete]
+- apiGroups: [monitoring.coreos.com]
+  resources: [servicemonitors, podmonitors, prometheusrules]
+  verbs: [create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tenant-rules-admin
+  labels:
+    rbac.platform.example.com/aggregate-to-tenant-admin: "true"
+rules:
+- apiGroups: ['']
+  resources: [secrets]
+  verbs: [get, list, watch]
+# Bring-your-own SecretStore (for example a team's own Vault mount)
+- apiGroups: [external-secrets.io]
+  resources: [secretstores]
+  verbs: [create, update, patch, delete]
+# Extra allow rules on top of the generated default-deny (Kyverno recreates the
+# default-deny policies if they are deleted)
+- apiGroups: [networking.k8s.io]
+  resources: [networkpolicies]
+  verbs: [create, update, patch, delete]
+- apiGroups: [security.istio.io]
+  resources: [authorizationpolicies]
+  verbs: [create, update, patch, delete]

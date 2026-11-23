@@ -1,4 +1,4 @@
-{{- $name := required "name is required (set by the tenants ApplicationSet)" .Values.name -}}
+{{- $name := include "tenant.name" . -}}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -16,14 +16,12 @@ spec:
     - server: {{ .Values.destinationServer }}
       namespace: {{ printf "%s-*" $name | quote }}
   # No cluster-scoped resources for tenants. Namespaces are created by Argo CD's
-  # CreateNamespace sync option, not by tenant manifests.
+  # CreateNamespace sync option on the platform-owned Applications, not by tenant manifests.
   clusterResourceWhitelist: []
-  # Platform controls quotas and limits (generate them with Kyverno later if wanted).
-  namespaceResourceBlacklist:
-    - group: ""
-      kind: ResourceQuota
-    - group: ""
-      kind: LimitRange
+  # Only these namespaced kinds. Anything else in a tenant repo (Kyverno policies,
+  # PolicyExceptions, Endpoints, quotas, Argo CD objects) is refused at sync time.
+  namespaceResourceWhitelist:
+    {{- include "tenant.namespaceResources" . | nindent 4 }}
   roles:
     - name: developers
       description: {{ $name }} developers. Can view, sync and run actions; cannot create or edit Applications.

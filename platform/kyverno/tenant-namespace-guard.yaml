@@ -1,12 +1,15 @@
 # Makes the tenant labels trustworthy, because every other policy and the
 # ClusterSecretStore keys off them.
 #
-#  1. Only Argo CD's application controller (driven by the platform-owned
-#     tenant-apps ApplicationSet) or platform admins may add, change or remove
-#     the tenant labels on a Namespace.
-#  2. A namespace labelled tenant=X must be named X or X-*. Combined with each
-#     tenant's AppProject only allowing destinations X and X-*, myapp cannot obtain a
-#     namespace labelled as team-b, even through Argo CD.
+#  1. Only Argo CD's application controller (applying the platform-owned tenant
+#     Applications' managedNamespaceMetadata) or platform admins may add, change or
+#     remove the tenant labels on a Namespace.
+#  2. Once a namespace has a tenant label, only platform admins can change or remove
+#     it, Argo CD included. An Application for one tenant therefore cannot take over a
+#     namespace that already belongs to another.
+#  3. A namespace labelled tenant=X must be named X or X-*, and X must be a valid tenant
+#     name (lowercase letters and digits, no hyphens). Without hyphens in tenant names,
+#     no tenant's X-* can ever overlap another tenant's namespaces.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -51,8 +54,8 @@ spec:
                 (request.operation == 'UPDATE' && has(oldObject.metadata.labels) && 'platform.example.com/tenant' in oldObject.metadata.labels
                   ? oldObject.metadata.labels['platform.example.com/tenant'] : '')
               message: >-
-                The platform.example.com/tenant label is managed by the platform (Argo CD tenant-apps
-                ApplicationSet) and cannot be set, changed or removed directly.
+                The platform.example.com/tenant label is managed by the platform (the tenant's
+                Argo CD Applications) and cannot be set, changed or removed directly.
             - expression: >-
                 (has(object.metadata.labels) && 'platform.example.com/tenant-registry' in object.metadata.labels
                   ? object.metadata.labels['platform.example.com/tenant-registry'] : '')
@@ -62,6 +65,34 @@ spec:
               message: >-
                 The platform.example.com/tenant-registry label is managed by the platform and cannot
                 be set, changed or removed directly. Set registry.enabled in the tenant's tenant.yaml.
+
+    # No Argo CD exclusion here: a tenant label, once set, is the namespace's owner.
+    - name: tenant-label-immutable
+      match:
+        any:
+          - resources:
+              kinds: ["Namespace"]
+              operations: ["UPDATE"]
+      exclude:
+        any:
+          - subjects:
+              - kind: Group
+                name: platform-admins
+          - subjects:
+              - kind: Group
+                name: system:masters
+      validate:
+        failureAction: Enforce
+        cel:
+          expressions:
+            - expression: >-
+                !(has(oldObject.metadata.labels) && 'platform.example.com/tenant' in oldObject.metadata.labels
+                  && oldObject.metadata.labels['platform.example.com/tenant'] != '')
+                || (has(object.metadata.labels) && 'platform.example.com/tenant' in object.metadata.labels
+                  && object.metadata.labels['platform.example.com/tenant'] == oldObject.metadata.labels['platform.example.com/tenant'])
+              message: >-
+                This namespace already belongs to a tenant. Only platform admins can change or remove
+                its platform.example.com/tenant label.
 
     - name: tenant-namespace-name-prefix
       match:
@@ -79,3 +110,9 @@ spec:
                 || object.metadata.name.startsWith(object.metadata.labels['platform.example.com/tenant'] + '-')
               message: >-
                 A namespace labelled platform.example.com/tenant=<tenant> must be named <tenant> or <tenant>-<name>.
+            - expression: >-
+                !(has(object.metadata.labels) && 'platform.example.com/tenant' in object.metadata.labels)
+                || object.metadata.labels['platform.example.com/tenant'].matches('^[a-z][a-z0-9]{1,30}$')
+              message: >-
+                Tenant names are 2-31 lowercase letters and digits with no hyphens, so one tenant's
+                <tenant>-* namespaces can never overlap another's.

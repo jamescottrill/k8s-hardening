@@ -36,5 +36,11 @@ vault write "auth/${AUTH_MOUNT}/role/external-secrets" \
   token_policies=external-secrets \
   token_ttl=1h
 
+# Private per-person KV space (kv/users/<entity id>/*). Attach it to your OIDC role so
+# everyone gets it at login, for example:
+#   vault write auth/oidc/role/<role> token_policies="default,user-private" ...
+# (that call replaces the role's settings: read the role first and keep its values).
+vault policy write user-private "${HERE}/user-private.hcl"
+
 echo "Done. Now store the shared registry credential, for example:"
 echo "  vault kv put ${KV_MOUNT}/platform/registry registry=quay.example.com username='platform+puller' password=..."

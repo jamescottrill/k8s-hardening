@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: Service
+metadata: {name: hijack, namespace: myapp-dev}
+spec: {type: ExternalName, externalName: api.teamb-api.svc.cluster.local}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web-svc, namespace: myapp-dev}
+spec:
+  selector: {app: web}
+  ports: [{port: 80}]
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: myapp-x-prod
+  labels: {platform.example.com/tenant: myapp-x}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: myapp-qa
+  labels: {platform.example.com/tenant: myapp}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: teamb-stolen
+  labels: {platform.example.com/tenant: myapp}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: steal, namespace: myapp-dev}
+spec:
+  secretStoreRef: {kind: ClusterSecretStore, name: platform-vault}
+  target: {name: steal}
+  data:
+    - secretKey: password
+      remoteRef: {key: tenants/teamb/registry, property: password}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: own, namespace: myapp-dev}
+spec:
+  secretStoreRef: {kind: SecretStore, name: myapp-vault}
+  target: {name: own}
+  data:
+    - secretKey: password
+      remoteRef: {key: myapp/db, property: password}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: intercept, namespace: myapp-dev}
+spec:
+  selector: {app: web}
+  ports: [{port: 443}]
+  externalIPs: [10.0.0.10]

@@ -5,10 +5,17 @@ namespace that is labelled as this tenant AND whose name matches one of the entr
 patterns. Namespaces created later get the binding automatically, and removing an
 entry removes its RoleBindings (synchronize: true).
 
+tenant-editor (direct writes) is never bound in productionNamespaces, whatever the
+entry's patterns say, so production only changes through Git.
+
 Kyverno variables are wrapped in a quoted Helm string so Helm passes them through.
 */ -}}
-{{- $name := required "name is required (set by the tenants ApplicationSet)" .Values.name -}}
-{{- $allowedRoles := list "tenant-viewer" "tenant-developer" "tenant-admin" -}}
+{{- $name := include "tenant.name" . -}}
+{{- $allowedRoles := list "tenant-viewer" "tenant-developer" "tenant-editor" "tenant-admin" -}}
+{{- $production := list -}}
+{{- range .Values.productionNamespaces }}
+{{- $production = append $production (replace "TENANT" $name .) -}}
+{{- end }}
 {{- $seen := dict -}}
 {{- if .Values.access }}
 apiVersion: kyverno.io/v1
@@ -53,6 +60,14 @@ spec:
               selector:
                 matchLabels:
                   platform.example.com/tenant: {{ $name | quote }}
+      {{- if and (eq $role "tenant-editor") $production }}
+      exclude:
+        any:
+          - resources:
+              kinds: ["Namespace"]
+              names:
+                {{- toYaml $production | nindent 16 }}
+      {{- end }}
       generate:
         generateExisting: true
         synchronize: true

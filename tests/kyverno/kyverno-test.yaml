@@ -1,0 +1,61 @@
+# Run: kyverno test tests/kyverno   (or docker, see .github/workflows/test.yml)
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: tenancy-guards
+policies:
+  - ../../platform/kyverno/tenant-application-guard.yaml
+  - ../../platform/kyverno/tenant-service-guard.yaml
+  - ../../platform/kyverno/tenant-namespace-guard.yaml
+  - ../../platform/kyverno/restrict-cluster-secret-store.yaml
+resources:
+  - ../../tenants/myapp/applications/shared.yaml
+  - ../../tenants/myapp/applications/web-dev.yaml
+  - ../../tenants/myapp/applications/web-prod.yaml
+  - ../../tenants/myapp/applications/tenant.yaml
+  - ../../tenants/teamb/applications/api.yaml
+  - bad-applications.yaml
+  - other-resources.yaml
+variables: values.yaml
+results:
+  # Every real tenant Application in the repo passes
+  - policy: tenant-application-guard
+    rule: tenant-application-matches-tenant
+    kind: Application
+    resources: [myapp-shared, myapp-web-dev, myapp-web-prod, teamb-api, tenant-myapp, core-cert-manager]
+    result: pass
+  - policy: tenant-application-guard
+    rule: tenant-application-matches-tenant
+    kind: Application
+    resources: [core-unlisted, myapp-steal, myapp-mislabel, myapp-nolabels, myapp-privileged, myapp-remote, teamb-wrongproject, web]
+    result: fail
+  - policy: tenant-service-guard
+    rule: deny-externalips-and-externalname
+    kind: Service
+    resources: [hijack, intercept]
+    result: fail
+  - policy: tenant-service-guard
+    rule: deny-externalips-and-externalname
+    kind: Service
+    resources: [web-svc]
+    result: pass
+  - policy: tenant-namespace-guard
+    rule: tenant-namespace-name-prefix
+    kind: Namespace
+    resources: [myapp-x-prod, teamb-stolen]
+    result: fail
+  - policy: tenant-namespace-guard
+    rule: tenant-namespace-name-prefix
+    kind: Namespace
+    resources: [myapp-qa]
+    result: pass
+  - policy: restrict-cluster-secret-store
+    rule: deny-tenant-clustersecretstore-refs
+    kind: ExternalSecret
+    resources: [steal]
+    result: fail
+  - policy: restrict-cluster-secret-store
+    rule: deny-tenant-clustersecretstore-refs
+    kind: ExternalSecret
+    resources: [own]
+    result: pass
