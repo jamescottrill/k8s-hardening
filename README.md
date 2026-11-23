@@ -251,13 +251,14 @@ sourceRepos, selfHeal in production) before merge.
 
 ## What was and was not tested
 
-Run `pip install -r requirements-test.txt && pytest tests` and `kyverno test tests/kyverno`; CI (`.github/workflows/test.yml`) runs both plus shellcheck.
+Run `pip install -r requirements-test.txt && pytest tests`, `kyverno test tests/kyverno` and the Vault compose test below; CI (`.github/workflows/test.yml`) runs all three plus shellcheck.
 
 - `tests/test_rbac.py` resolves the aggregated profiles and checks tier ordering, secret access, the kinds no profile may create, wildcards and escalation verbs, and that Kyverno's `bind` list and the chart's allowed roles match the profiles.
 - `tests/test_chart.py` renders the tenant chart with real `helm template` for each tenant, checks the AppProject whitelist and the production exclusion for `tenant-editor`, and checks that bad names, forbidden kinds and bad access entries fail.
 - `tests/test_applications.py` checks every Application file against its tenant.
 - `tests/kyverno/` runs `tenant-application-guard`, `tenant-service-guard`, the namespace name rule and `restrict-cluster-secret-store` on CREATE with the Kyverno CLI, against the real Application files and deliberately bad ones.
 - `tests/test_cel_updates.py` evaluates the UPDATE-only rules (tenant label immutability, force-sync) with cel-python, because the Kyverno CLI cannot supply `oldObject`.
+- `tests/vault/` runs `setup.sh` and `onboard-tenant.sh` (twice) against a Vault dev server in Docker, then checks with real tokens what the tenant writer, ESO and per-person policies allow and refuse, including a non-default `KV_MOUNT`: `docker compose -f tests/vault/docker-compose.yml run --rm --build test`.
 - **Not tested on a cluster:** the generate, mutate and podSecurity rules, aggregation of the profiles, the `\{{ }}` escape, and subject-based exclusions. Check after the first sync:
 
 ```bash

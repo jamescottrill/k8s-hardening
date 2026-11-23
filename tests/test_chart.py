@@ -90,6 +90,8 @@ def test_invalid_or_reserved_tenant_names_are_refused(name):
         ({"group": "*", "kind": "Deployment"}, "wildcards"),
         ({"group": "apps", "kind": "*"}, "wildcards"),
         ({"kind": "Thing"}, "needs a group"),
+        ({"group": "keda.sh"}, "needs a non-empty kind"),
+        ({"group": "keda.sh", "kind": ""}, "needs a non-empty kind"),
     ],
 )
 def test_forbidden_namespace_resources_are_refused(extra, expected):

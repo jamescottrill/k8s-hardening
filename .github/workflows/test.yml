@@ -32,8 +32,16 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - run: docker run --rm -v "$PWD:/repo:ro" -w /repo "$KYVERNO_CLI" test tests/kyverno
 
+  vault:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: docker compose -f tests/vault/docker-compose.yml run --rm --build test
+      - if: always()
+        run: docker compose -f tests/vault/docker-compose.yml down -v
+
   shellcheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - run: shellcheck vault/*.sh
+      - run: shellcheck vault/*.sh tests/vault/run.sh

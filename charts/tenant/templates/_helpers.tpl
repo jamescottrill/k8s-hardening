@@ -32,6 +32,9 @@ Argo CD, lift quotas, or route traffic to other tenants' pods.
 {{- if not (hasKey $r "group") -}}
 {{- fail (printf "namespace resource %d (%v) needs a group (\"\" for the core group)" $i $r) -}}
 {{- end -}}
+{{- if not (and (hasKey $r "kind") (kindIs "string" $r.kind) $r.kind) -}}
+{{- fail (printf "namespace resource %d (%v) needs a non-empty kind" $i $r) -}}
+{{- end -}}
 {{- if or (eq (toString $r.group) "*") (eq (toString $r.kind) "*") (eq (toString $r.kind) "") -}}
 {{- fail (printf "namespace resource %d: wildcards and empty kinds are not allowed (%v)" $i $r) -}}
 {{- end -}}

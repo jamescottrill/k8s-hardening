@@ -33,8 +33,16 @@ vault write identity/group \
   name="tenant-${TENANT}" type=external policies="tenant-${TENANT}-writer" >/dev/null
 GROUP_ID="$(vault read -field=id "identity/group/name/tenant-${TENANT}")"
 
-vault write identity/group-alias \
-  name="${GROUP}" mount_accessor="${OIDC_MOUNT_ACCESSOR}" canonical_id="${GROUP_ID}" >/dev/null
+# An external group has at most one alias. Update it if it exists (re-runs, or a
+# renamed IdP group), otherwise create it.
+ALIAS_ID="$(vault read -format=json "identity/group/name/tenant-${TENANT}" | jq -r '.data.alias.id // empty')"
+if [[ -n "${ALIAS_ID}" ]]; then
+  vault write "identity/group-alias/id/${ALIAS_ID}" \
+    name="${GROUP}" mount_accessor="${OIDC_MOUNT_ACCESSOR}" canonical_id="${GROUP_ID}" >/dev/null
+else
+  vault write identity/group-alias \
+    name="${GROUP}" mount_accessor="${OIDC_MOUNT_ACCESSOR}" canonical_id="${GROUP_ID}" >/dev/null
+fi
 
 echo "tenant-${TENANT} can now run, for example:"
 echo "  vault kv put ${KV_MOUNT}/tenants/${TENANT}/registry registry=quay.example.com username='${TENANT}+puller' password=..."

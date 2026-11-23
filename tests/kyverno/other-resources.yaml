@@ -132,3 +132,22 @@ rules:
   - apiGroups: [""]
     resources: [endpoints, configmaps]
     verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: crd-writer, namespace: myapp-dev}
+rules:
+  - apiGroups: [acme.example.com]
+    resources: [widgets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: ci-runner, namespace: myapp-dev}
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/exec, secrets]
+    verbs: [create, delete, get]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, delete]

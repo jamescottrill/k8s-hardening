@@ -1,0 +1,23 @@
+# Vault policy and script tests against a throwaway dev server.
+#   docker compose -f tests/vault/docker-compose.yml run --rm --build test
+#   docker compose -f tests/vault/docker-compose.yml down
+services:
+  vault:
+    image: hashicorp/vault:2.2.2
+    command: server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200
+    cap_add: [IPC_LOCK]
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 2s
+      retries: 15
+  test:
+    build: .
+    depends_on:
+      vault: {condition: service_healthy}
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+    volumes:
+      - ../..:/repo:ro
+    working_dir: /repo
+    command: ["bash", "tests/vault/run.sh"]

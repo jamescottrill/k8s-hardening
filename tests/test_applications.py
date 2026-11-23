@@ -103,3 +103,28 @@ def test_production_is_self_healing(tenant, path, app):
 def test_application_names_are_unique():
     names = [app["metadata"]["name"] for _, _, app in APPS]
     assert len(names) == len(set(names))
+
+
+def _editor_patterns(tenant):
+    values = _tenant_values(tenant)
+    return [
+        pattern
+        for entry in values.get("access", [])
+        if entry["role"] == "tenant-editor"
+        for pattern in entry["namespaces"]
+    ]
+
+
+@pytest.mark.parametrize("tenant,path,app", APPS, ids=IDS)
+def test_editor_namespaces_do_not_self_heal(tenant, path, app):
+    """Where a group has tenant-editor, selfHeal would revert its direct changes."""
+    if path.name == "tenant.yaml":
+        return
+    values = _tenant_values(tenant)
+    production = values.get("productionNamespaces", _chart_defaults()["productionNamespaces"])
+    production = [p.replace("TENANT", tenant) for p in production]
+    namespace = app["spec"]["destination"]["namespace"]
+    if any(fnmatch.fnmatchcase(namespace, p) for p in production):
+        return  # editor is never bound in production
+    if any(fnmatch.fnmatchcase(namespace, p) for p in _editor_patterns(tenant)):
+        assert app["spec"]["syncPolicy"]["automated"]["selfHeal"] is False

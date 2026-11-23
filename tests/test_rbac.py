@@ -178,3 +178,54 @@ def test_chart_accepts_exactly_the_profiles():
     match = re.search(r'\$allowedRoles := list ((?:"[^"]+" ?)+)', template)
     assert match
     assert sorted(re.findall(r'"([^"]+)"', match.group(1))) == sorted(PROFILES)
+
+
+# Kind -> resource for the AppProject whitelist. Explicit rather than guessed plurals.
+KIND_TO_RESOURCE = {
+    "ConfigMap": "configmaps", "Secret": "secrets", "Service": "services",
+    "ServiceAccount": "serviceaccounts", "PersistentVolumeClaim": "persistentvolumeclaims",
+    "Deployment": "deployments", "StatefulSet": "statefulsets", "Job": "jobs",
+    "CronJob": "cronjobs", "HorizontalPodAutoscaler": "horizontalpodautoscalers",
+    "PodDisruptionBudget": "poddisruptionbudgets", "Ingress": "ingresses",
+    "NetworkPolicy": "networkpolicies", "Role": "roles", "RoleBinding": "rolebindings",
+    "ExternalSecret": "externalsecrets", "SecretStore": "secretstores",
+    "HTTPRoute": "httproutes", "GRPCRoute": "grpcroutes",
+    "VirtualService": "virtualservices", "DestinationRule": "destinationrules",
+    "AuthorizationPolicy": "authorizationpolicies", "Certificate": "certificates",
+    "ServiceMonitor": "servicemonitors", "PodMonitor": "podmonitors",
+    "PrometheusRule": "prometheusrules",
+}
+
+
+def _role_guard_allowed_writes():
+    import ast
+
+    (policy,) = load_docs(REPO / "platform/kyverno/tenant-rbac-guard.yaml")
+    (rule,) = [r for r in policy["spec"]["rules"] if r["name"] == "tenant-roles-least-privilege"]
+    (var,) = [v for v in rule["validate"]["cel"]["variables"] if v["name"] == "allowedWrites"]
+    # The CEL list literal of strings is also a valid Python literal.
+    return set(ast.literal_eval(var["expression"]))
+
+
+def test_role_guard_allows_writes_to_every_whitelisted_kind():
+    """A Role may grant writes to whatever Argo CD may deploy, so the two lists agree."""
+    import yaml
+
+    with open(REPO / "charts/tenant/values.yaml", encoding="utf-8") as handle:
+        whitelist = yaml.safe_load(handle)["namespaceResources"]
+    allowed = _role_guard_allowed_writes()
+    for entry in whitelist:
+        key = f'{entry["group"]}/{KIND_TO_RESOURCE[entry["kind"]]}'
+        assert key in allowed, f"{key} is in the AppProject whitelist but not in tenant-rbac-guard"
+
+
+def test_role_guard_never_allows_routing_or_platform_kinds():
+    allowed = _role_guard_allowed_writes()
+    for key in [
+        "/endpoints", "discovery.k8s.io/endpointslices", "/resourcequotas", "/limitranges",
+        "apps/daemonsets", "networking.istio.io/serviceentries", "networking.istio.io/sidecars",
+        "gateway.networking.k8s.io/referencegrants", "external-secrets.io/pushsecrets",
+        "kyverno.io/policies", "kyverno.io/policyexceptions", "argoproj.io/applications",
+        "/serviceaccounts/token",
+    ]:
+        assert key not in allowed, key

@@ -73,10 +73,10 @@ results:
   - policy: tenant-rbac-guard
     rule: tenant-roles-least-privilege
     kind: Role
-    resources: [endpoint-writer, policy-writer]
+    resources: [endpoint-writer, policy-writer, crd-writer]
     result: fail
   - policy: tenant-rbac-guard
     rule: tenant-roles-least-privilege
     kind: Role
-    resources: [leader-election]
+    resources: [leader-election, ci-runner]
     result: pass
