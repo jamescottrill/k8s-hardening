@@ -3,6 +3,12 @@
 # which refuses any tenant Application whose project, name, destination or namespace
 # labels do not match its tenant. tenants/<tenant>/tenant.yaml is chart values, not a
 # manifest, so it is not included here.
+#
+# Deliberately no resources finaliser: deleting or recreating this one Application (by
+# mistake, or while rebuilding Argo CD) must not delete every tenant's workloads.
+# Deleting it orphans the tenant Applications, which keep running. Each tenant's chart
+# and workload Applications carry their own finalisers, so removing a tenant's files
+# still cleans up that tenant.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
