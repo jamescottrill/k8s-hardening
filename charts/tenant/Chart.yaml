@@ -1,0 +1,5 @@
+apiVersion: v2
+name: tenant
+description: Per-tenant Argo CD AppProject and RBAC, rendered by the tenants ApplicationSet
+type: application
+version: 0.1.0

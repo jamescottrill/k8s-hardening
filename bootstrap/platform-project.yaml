@@ -1,0 +1,28 @@
+# Applied once by hand (kubectl apply -f bootstrap/), then Argo CD manages everything else.
+# The platform project is the only project allowed to create cluster-scoped resources,
+# AppProjects and ApplicationSets.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: Platform team owned resources (tenancy, policy, secrets plumbing)
+  sourceRepos:
+    - https://github.com/example-org/platform-gitops.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  roles:
+    - name: admins
+      description: Platform administrators
+      groups:
+        - platform-admins
+      policies:
+        - p, proj:platform:admins, applications, *, platform/*, allow

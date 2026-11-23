@@ -1,0 +1,49 @@
+# One Application per tenant directory, rendering the tenant chart: the AppProject and
+# the Kyverno policy that generates the tenant's RoleBindings from its access: list.
+# The tenant name is ALWAYS the directory name; nothing in tenant.yaml can override it.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tenants
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/example-org/platform-gitops.git
+        revision: main
+        files:
+          - path: tenants/*/tenant.yaml
+  template:
+    metadata:
+      name: 'tenant-{{ .path.basename }}'
+      labels:
+        platform.example.com/tenant: '{{ .path.basename }}'
+      annotations:
+        # Kyverno defaults fields on ClusterPolicies; server-side diff avoids false OutOfSync.
+        argocd.argoproj.io/compare-options: ServerSideDiff=true
+    spec:
+      project: platform
+      source:
+        repoURL: https://github.com/example-org/platform-gitops.git
+        targetRevision: main
+        path: charts/tenant
+        helm:
+          valueFiles:
+            - '../../tenants/{{ .path.basename }}/tenant.yaml'
+          parameters:
+            # Parameters win over value files, so the directory name is authoritative.
+            - name: name
+              value: '{{ .path.basename }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true

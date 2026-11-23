@@ -1,0 +1,10 @@
+# Team owned. Production pins a release tag rather than tracking main.
+namespace: myapp-prod
+source:
+  repoURL: https://github.com/example-org/myapp-web.git
+  path: deploy/chart
+  targetRevision: v1.4.2
+helm:
+  valueFiles:
+    - values.yaml
+    - values-prod.yaml

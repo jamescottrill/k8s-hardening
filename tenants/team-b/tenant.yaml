@@ -1,0 +1,9 @@
+# Platform owned (CODEOWNERS). The tenant name is the directory name: team-b.
+owners:
+  groups:
+    - team-b-developers
+sourceRepos:
+  - https://github.com/example-org/team-b-api.git
+registry:
+  # team-b only pulls from the shared platform registry
+  enabled: false

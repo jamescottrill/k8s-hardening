@@ -1,0 +1,99 @@
+# CIS 5.1 RBAC controls that can be checked by admission and background scanning.
+# Tenant Roles and RoleBindings are enforced separately in tenant-rbac-guard.yaml.
+---
+# CIS 5.1.1: cluster-admin only where required. New bindings to cluster-admin may only
+# name the platform-admins group. The kubeadm-created bindings are excluded; any other
+# existing violators appear in ClusterPolicyReports.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: cis-restrict-cluster-admin-bindings
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    policies.kyverno.io/title: CIS 5.1.1 Restrict cluster-admin bindings
+    policies.kyverno.io/category: CIS 5.1
+    policies.kyverno.io/subject: ClusterRoleBinding, RoleBinding
+spec:
+  background: true
+  rules:
+    - name: cluster-admin-platform-admins-only
+      match:
+        any:
+          - resources:
+              kinds: ["ClusterRoleBinding", "RoleBinding"]
+      exclude:
+        any:
+          - resources:
+              names: ["cluster-admin", "kubeadm:cluster-admins"]
+      validate:
+        failureAction: Enforce
+        cel:
+          expressions:
+            - expression: >-
+                object.roleRef.name != 'cluster-admin'
+                || (has(object.subjects) && object.subjects.all(s, s.kind == 'Group' && s.name in ['platform-admins']))
+              message: >-
+                cluster-admin may only be bound to the platform-admins group (CIS 5.1.1). Use a
+                purpose-built ClusterRole instead.
+---
+# CIS 5.1.3, 5.1.8 and 5.1.9 to 5.1.13 across all ClusterRoles and Roles. Audit only:
+# controllers such as Argo CD, Kyverno and ESO legitimately hold some of these rights,
+# so the job here is visibility (PolicyReports) and a documented exception list, not
+# blocking upgrades of those components.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: cis-rbac-hygiene
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    policies.kyverno.io/title: CIS 5.1 RBAC hygiene (audit)
+    policies.kyverno.io/category: CIS 5.1
+    policies.kyverno.io/subject: ClusterRole, Role
+spec:
+  background: true
+  rules:
+    - name: rbac-hygiene
+      match:
+        any:
+          - resources:
+              kinds: ["ClusterRole", "Role"]
+      exclude:
+        any:
+          - resources:
+              # Kubernetes built-ins. Review once, then leave them to upstream.
+              names: ["system:*", "cluster-admin", "admin", "edit", "view"]
+      validate:
+        failureAction: Audit
+        cel:
+          expressions:
+            - expression: >-
+                !has(object.rules) || object.rules.all(r,
+                  !('*' in r.verbs)
+                  && !(has(r.resources) && '*' in r.resources)
+                  && !(has(r.apiGroups) && '*' in r.apiGroups))
+              message: CIS 5.1.3 Minimise wildcard use in Roles and ClusterRoles.
+            - expression: >-
+                !has(object.rules) || object.rules.all(r, !r.verbs.exists(v, v in ['bind', 'escalate', 'impersonate']))
+              message: CIS 5.1.8 Limit use of the bind, impersonate and escalate permissions.
+            - expression: >-
+                !has(object.rules) || object.rules.all(r,
+                  !(has(r.resources) && 'persistentvolumes' in r.resources && 'create' in r.verbs))
+              message: CIS 5.1.9 Minimise access to create persistent volumes.
+            - expression: >-
+                !has(object.rules) || object.rules.all(r, !(has(r.resources) && 'nodes/proxy' in r.resources))
+              message: CIS 5.1.10 Minimise access to the proxy sub-resource of nodes.
+            - expression: >-
+                !has(object.rules) || object.rules.all(r,
+                  !(has(r.resources) && 'certificatesigningrequests/approval' in r.resources
+                    && r.verbs.exists(v, v in ['update', 'patch'])))
+              message: CIS 5.1.11 Minimise access to the approval sub-resource of CertificateSigningRequests.
+            - expression: >-
+                !has(object.rules) || object.rules.all(r,
+                  !(has(r.resources)
+                    && r.resources.exists(x, x in ['validatingwebhookconfigurations', 'mutatingwebhookconfigurations'])
+                    && r.verbs.exists(v, v in ['create', 'update', 'patch', 'delete'])))
+              message: CIS 5.1.12 Minimise access to webhook configuration objects.
+            - expression: >-
+                !has(object.rules) || object.rules.all(r,
+                  !(has(r.resources) && 'serviceaccounts/token' in r.resources && 'create' in r.verbs))
+              message: CIS 5.1.13 Minimise access to the service account token creation.

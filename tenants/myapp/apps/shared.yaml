@@ -1,0 +1,6 @@
+# Team owned. Shared services in the bare tenant namespace "myapp".
+namespace: myapp
+source:
+  repoURL: https://github.com/example-org/myapp-shared.git
+  path: deploy/overlays/prod
+  targetRevision: main

@@ -1,0 +1,6 @@
+# Team owned. Plain manifests or Kustomize: no helm block needed.
+namespace: team-b-api
+source:
+  repoURL: https://github.com/example-org/team-b-api.git
+  path: deploy/overlays/prod
+  targetRevision: main

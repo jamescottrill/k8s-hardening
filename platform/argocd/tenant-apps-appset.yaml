@@ -1,0 +1,81 @@
+# One Application per file in tenants/<tenant>/apps/*.yaml.
+#
+# Teams own their apps/ directory (CODEOWNERS); the platform team owns tenant.yaml and
+# this ApplicationSet. Teams cannot create Applications themselves (see the tenant
+# AppProject role), so the only way a namespace gets tenant labels is through here.
+#
+# What this guarantees for every tenant Application:
+#   - project    = the tenant's AppProject (destinations limited to <tenant> and <tenant>-*)
+#   - namespace  = the namespace named in the app file, created by Argo CD on first sync.
+#                  A name outside the tenant is refused by the AppProject and by Kyverno.
+#   - labels     = tenant labels plus Pod Security Admission "restricted" on the namespace
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tenant-apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          # 1. Tenant definitions (platform owned): gives .tenant.path.* and .registry
+          - git:
+              repoURL: https://github.com/example-org/platform-gitops.git
+              revision: main
+              pathParamPrefix: tenant
+              files:
+                - path: tenants/*/tenant.yaml
+          # 2. That tenant's apps (team owned): gives .app.path.*, .namespace, .source, .helm
+          - git:
+              repoURL: https://github.com/example-org/platform-gitops.git
+              revision: main
+              pathParamPrefix: app
+              files:
+                - path: 'tenants/{{ .tenant.path.basename }}/apps/*.yaml'
+  template:
+    metadata:
+      name: '{{ .tenant.path.basename }}-{{ .app.path.filename | trimSuffix ".yaml" }}'
+      labels:
+        platform.example.com/tenant: '{{ .tenant.path.basename }}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: '{{ .tenant.path.basename }}'
+      source:
+        repoURL: '{{ .source.repoURL }}'
+        path: '{{ .source.path }}'
+        targetRevision: '{{ .source.targetRevision }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ .namespace }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        managedNamespaceMetadata:
+          labels:
+            platform.example.com/tenant: '{{ .tenant.path.basename }}'
+            platform.example.com/tenant-registry: '{{ .registry.enabled }}'
+            # CIS 5.2.1: built-in Pod Security Admission alongside Kyverno
+            pod-security.kubernetes.io/enforce: restricted
+            pod-security.kubernetes.io/enforce-version: latest
+            pod-security.kubernetes.io/audit: restricted
+            pod-security.kubernetes.io/warn: restricted
+  # Optional Helm value files, only when the app file has a helm: block.
+  templatePatch: |
+    {{- if hasKey . "helm" }}
+    spec:
+      source:
+        helm:
+          valueFiles:
+          {{- range .helm.valueFiles }}
+            - {{ . | quote }}
+          {{- end }}
+    {{- end }}

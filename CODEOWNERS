@@ -1,0 +1,6 @@
+# Platform team owns everything by default, including every tenant.yaml.
+*                        @example-org/platform-admins
+
+# Each team owns only its own apps directory.
+/tenants/myapp/apps/     @example-org/myapp-developers
+/tenants/team-b/apps/    @example-org/team-b-developers

@@ -1,0 +1,79 @@
+{{- /*
+Turns the tenant's access: list into a Kyverno ClusterPolicy. Each entry becomes a
+generate rule that creates a RoleBinding (group -> tenant ClusterRole) in every
+namespace that is labelled as this tenant AND whose name matches one of the entry's
+patterns. Namespaces created later get the binding automatically, and removing an
+entry removes its RoleBindings (synchronize: true).
+
+Kyverno variables are wrapped in a quoted Helm string so Helm passes them through.
+*/ -}}
+{{- $name := required "name is required (set by the tenants ApplicationSet)" .Values.name -}}
+{{- $allowedRoles := list "tenant-viewer" "tenant-developer" "tenant-admin" -}}
+{{- $seen := dict -}}
+{{- if .Values.access }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: tenant-access-{{ $name }}
+  labels:
+    platform.example.com/tenant: {{ $name | quote }}
+  annotations:
+    policies.kyverno.io/title: Access bindings for tenant {{ $name }}
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/subject: Namespace, RoleBinding
+spec:
+  rules:
+{{- range $i, $a := .Values.access }}
+{{- $group := required (printf "access[%d].group is required" $i) $a.group }}
+{{- $role := required (printf "access[%d].role is required" $i) $a.role }}
+{{- if not (has $role $allowedRoles) }}
+{{- fail (printf "access[%d].role %q must be one of: %s" $i $role (join ", " $allowedRoles)) }}
+{{- end }}
+{{- $key := printf "%s|%s" $group $role }}
+{{- if hasKey $seen $key }}
+{{- fail (printf "access: group %q is given role %q more than once; merge the namespace lists" $group $role) }}
+{{- end }}
+{{- $_ := set $seen $key true }}
+{{- if not $a.namespaces }}
+{{- fail (printf "access[%d].namespaces must list at least one namespace or pattern" $i) }}
+{{- end }}
+{{- range $a.namespaces }}
+{{- if not (or (eq . $name) (eq . (printf "%s*" $name)) (hasPrefix (printf "%s-" $name) .)) }}
+{{- fail (printf "access[%d]: pattern %q is outside tenant %s (use %s, %s-<name> or %s*)" $i . $name $name $name $name) }}
+{{- end }}
+{{- end }}
+{{- $id := printf "%s-%s" (trimPrefix "tenant-" $role) (sha256sum $group | trunc 10) }}
+    - name: access-{{ $id }}
+      match:
+        any:
+          - resources:
+              kinds: ["Namespace"]
+              names:
+                {{- toYaml $a.namespaces | nindent 16 }}
+              selector:
+                matchLabels:
+                  platform.example.com/tenant: {{ $name | quote }}
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        name: tenant-access-{{ $id }}
+        namespace: {{ "'{{ request.object.metadata.name }}'" }}
+        data:
+          metadata:
+            labels:
+              app.kubernetes.io/managed-by: kyverno
+              platform.example.com/tenant: {{ $name | quote }}
+            annotations:
+              platform.example.com/group: {{ $group | quote }}
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: {{ $role }}
+          subjects:
+            - apiGroup: rbac.authorization.k8s.io
+              kind: Group
+              name: {{ printf "%s%s" $.Values.oidcGroupPrefix $group | quote }}
+{{- end }}
+{{- end }}

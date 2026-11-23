@@ -1,0 +1,31 @@
+# App-of-apps for the tenancy layer. Assumes Argo CD, Kyverno (>= 1.13) and
+# External Secrets Operator (>= 0.17, external-secrets.io/v1 API) are already installed.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-tenancy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # Kyverno defaults fields on ClusterPolicies; server-side diff avoids false OutOfSync.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/example-org/platform-gitops.git
+    targetRevision: main
+    path: platform
+    # Plain directory source: Argo CD does no templating here, so the {{ }} in the
+    # ApplicationSets, Kyverno policies and ESO templates reach the cluster untouched.
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

@@ -1,0 +1,27 @@
+# Injected by the tenants ApplicationSet from the directory name. Never set in tenant.yaml.
+name: ""
+
+# Git repos this tenant may deploy from (Argo CD glob syntax is fine).
+sourceRepos: []
+
+owners:
+  # IdP (Keycloak) groups mapped to the tenant's Argo CD project role.
+  groups: []
+
+# Read by the tenant-apps ApplicationSet, not by this chart. Kept here so the
+# values file validates. true = this tenant has its own registry credential in Vault.
+registry:
+  enabled: false
+
+# Kubernetes RBAC for OIDC groups, rendered as Kyverno-generated RoleBindings.
+#   - group: <IdP group>
+#     role: tenant-viewer | tenant-developer | tenant-admin
+#     namespaces: ["<tenant>", "<tenant>-dev", "<tenant>-*"]
+access: []
+
+# Must match the API server's --oidc-groups-prefix (empty if you do not set one).
+# Platform-wide value: set it here rather than in tenant.yaml.
+oidcGroupPrefix: ""
+
+argocdNamespace: argocd
+destinationServer: https://kubernetes.default.svc
