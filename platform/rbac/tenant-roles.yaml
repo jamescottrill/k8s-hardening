@@ -8,7 +8,9 @@
 #                     directly. Never bound in production namespaces (see the tenant chart).
 #   tenant-admin      developer + read Secrets, manage SecretStores, NetworkPolicies and
 #                     Istio security policy. Not a superset of tenant-editor: admin is
-#                     bound in production, where workloads only change through Git. Give
+#                     bound in production, where workload definitions only change
+#                     through Git. Developer and admin still act on the live namespace
+#                     there (exec, delete and evict pods, run Jobs, debug containers). Give
 #                     a lead group tenant-editor in non-production namespaces as well.
 #
 # How the profiles are built: the four rule sets below (read, debug, edit, admin) carry

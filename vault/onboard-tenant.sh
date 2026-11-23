@@ -9,6 +9,7 @@ set -euo pipefail
 TENANT="${1:?tenant name, e.g. myapp}"
 GROUP="${2:?IdP group name, e.g. myapp-developers}"
 : "${OIDC_MOUNT_ACCESSOR:?set OIDC_MOUNT_ACCESSOR}"
+KV_MOUNT="${KV_MOUNT:-kv}"   # must match setup.sh
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 # The name is substituted into a Vault policy path, where * and + are globs: an
@@ -17,12 +18,14 @@ if [[ ! "${TENANT}" =~ ^[a-z][a-z0-9]{1,30}$ ]]; then
   echo "tenant name '${TENANT}' must be 2-31 lowercase letters and digits, no hyphens" >&2
   exit 1
 fi
-if [[ ! "${GROUP}" =~ ^[A-Za-z0-9._:/-]+$ ]]; then
-  echo "group name '${GROUP}' contains unexpected characters" >&2
+
+if [[ ! "${KV_MOUNT}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+  echo "KV_MOUNT '${KV_MOUNT}' must be a single path segment" >&2
   exit 1
 fi
 
-sed "s/TENANT/${TENANT}/g" "${HERE}/tenant-writer.hcl.tpl" | vault policy write "tenant-${TENANT}-writer" -
+sed -e "s/TENANT/${TENANT}/g" -e "s#^path \"kv/#path \"${KV_MOUNT}/#" "${HERE}/tenant-writer.hcl.tpl" \
+  | vault policy write "tenant-${TENANT}-writer" -
 
 # Re-runnable: writing an existing group by name updates it and returns no id, so read
 # the id back by name.
@@ -34,4 +37,4 @@ vault write identity/group-alias \
   name="${GROUP}" mount_accessor="${OIDC_MOUNT_ACCESSOR}" canonical_id="${GROUP_ID}" >/dev/null
 
 echo "tenant-${TENANT} can now run, for example:"
-echo "  vault kv put kv/tenants/${TENANT}/registry registry=quay.example.com username='${TENANT}+puller' password=..."
+echo "  vault kv put ${KV_MOUNT}/tenants/${TENANT}/registry registry=quay.example.com username='${TENANT}+puller' password=..."

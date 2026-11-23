@@ -8,6 +8,7 @@ policies:
   - ../../platform/kyverno/tenant-service-guard.yaml
   - ../../platform/kyverno/tenant-namespace-guard.yaml
   - ../../platform/kyverno/restrict-cluster-secret-store.yaml
+  - ../../platform/kyverno/tenant-rbac-guard.yaml
 resources:
   - ../../tenants/myapp/applications/shared.yaml
   - ../../tenants/myapp/applications/web-dev.yaml
@@ -58,4 +59,24 @@ results:
     rule: deny-tenant-clustersecretstore-refs
     kind: ExternalSecret
     resources: [own]
+    result: pass
+  - policy: tenant-service-guard
+    rule: virtualservice-destinations-in-tenant
+    kind: VirtualService
+    resources: [vs-own]
+    result: pass
+  - policy: tenant-service-guard
+    rule: virtualservice-destinations-in-tenant
+    kind: VirtualService
+    resources: [vs-cross-tenant, vs-prefix-trick, vs-mirror, vs-tcp]
+    result: fail
+  - policy: tenant-rbac-guard
+    rule: tenant-roles-least-privilege
+    kind: Role
+    resources: [endpoint-writer, policy-writer]
+    result: fail
+  - policy: tenant-rbac-guard
+    rule: tenant-roles-least-privilege
+    kind: Role
+    resources: [leader-election]
     result: pass

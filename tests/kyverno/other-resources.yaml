@@ -55,3 +55,80 @@ spec:
   selector: {app: web}
   ports: [{port: 443}]
   externalIPs: [10.0.0.10]
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-own, namespace: myapp-dev}
+spec:
+  hosts: [web.example.com]
+  gateways: [istio-system/shared]
+  http:
+    - route:
+        - destination: {host: web}
+        - destination: {host: api.myapp-prod.svc.cluster.local}
+        - destination: {host: api.myapp}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-cross-tenant, namespace: myapp-dev}
+spec:
+  hosts: [web.example.com]
+  gateways: [istio-system/shared]
+  http:
+    - route:
+        - destination: {host: api.teamb-api.svc.cluster.local}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-prefix-trick, namespace: myapp-dev}
+spec:
+  hosts: [web.example.com]
+  http:
+    - route:
+        - destination: {host: api.myappx.svc.cluster.local}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-mirror, namespace: myapp-dev}
+spec:
+  hosts: [web.example.com]
+  http:
+    - route:
+        - destination: {host: web}
+      mirror: {host: api.teamb-api.svc.cluster.local}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-tcp, namespace: myapp-dev}
+spec:
+  hosts: [db]
+  tcp:
+    - route:
+        - destination: {host: db.teamb-api}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: endpoint-writer, namespace: myapp-dev}
+rules:
+  - apiGroups: [""]
+    resources: [endpoints]
+    verbs: [create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: policy-writer, namespace: myapp-dev}
+rules:
+  - apiGroups: [kyverno.io]
+    resources: [policies]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: leader-election, namespace: myapp-dev}
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, create, update]
+  - apiGroups: [""]
+    resources: [endpoints, configmaps]
+    verbs: [get, list, watch]

@@ -42,9 +42,9 @@ This is what stops one tenant reaching another's credentials or namespaces.
 3. **Tenant names are lowercase letters and digits, without hyphens**, and not on the reserved list (the chart refuses to render otherwise). AppProject destinations are `<tenant>` and `<tenant>-*`, and with no hyphens in names, one tenant's `<tenant>-*` can never cover another tenant's namespaces.
 4. **The AppProject whitelists namespaced kinds** (`namespaceResources` in `charts/tenant/values.yaml`). A team's repo cannot ship Kyverno policies or PolicyExceptions, Argo CD objects, Endpoints or EndpointSlices, quotas, or anything cluster-scoped. The chart refuses wildcards and platform-only kinds in `extraNamespaceResources`.
 5. **`tenant-namespace-guard`**: only the Argo CD application controller (or platform admins) may set the tenant labels. Once a namespace has a tenant label, only platform admins can change or remove it, Argo CD included. A namespace labelled `tenant=X` must be named `X` or `X-*`.
-6. **`tenant-rbac-guard`**: Argo CD applies team manifests with its own cluster-wide rights, so in tenant namespaces RoleBindings may only bind a Role to ServiceAccounts in the same namespace, and Roles may not use wildcards, bind, escalate, impersonate or create tokens. Human access comes only from `access:` in `tenant.yaml`.
+6. **`tenant-rbac-guard`**: Argo CD applies team manifests with its own cluster-wide rights, so in tenant namespaces RoleBindings may only bind a Role to ServiceAccounts in the same namespace, and Roles may not use wildcards, bind, escalate, impersonate or create tokens, grant anything in platform-only API groups, or grant writes to the kinds the AppProject keeps out (so a repo cannot hand its own ServiceAccount what Argo CD would refuse). Human access comes only from `access:` in `tenant.yaml`.
 7. **`restrict-cluster-secret-store`**: in tenant namespaces only Kyverno and ESO may create ExternalSecrets that use a ClusterSecretStore (checked in `secretStoreRef`, `data[].sourceRef` and `dataFrom[].sourceRef`). An update that leaves `spec` unchanged, such as a force-sync annotation, is allowed. Teams can bring their own namespaced SecretStore.
-8. **`tenant-service-guard`**: no ExternalName Services and no `spec.externalIPs` (CVE-2020-8554) in tenant namespaces, so a tenant cannot point the shared gateway at another tenant's Service or intercept traffic to an arbitrary IP.
+8. **`tenant-service-guard`**: no ExternalName Services and no `spec.externalIPs` (CVE-2020-8554) in tenant namespaces, and VirtualService routes, mirrors and delegates may only target the tenant's own namespaces, so a tenant cannot point the shared gateway at another tenant's Service or intercept traffic to an arbitrary IP. HTTPRoutes need a ReferenceGrant from the target namespace to cross namespaces, and tenants cannot create those.
 9. **Vault policy for ESO is read-only** and never covers `kv/users/`, so a PushSecret through `platform-vault` cannot overwrite anyone's credential and nothing in the cluster can read personal secrets.
 
 Kyverno's own settings (for example restricting PolicyExceptions to the `kyverno` namespace) are managed with the Kyverno installation, not here.
@@ -82,6 +82,14 @@ reverts the change within minutes. The next sync from Git (any new commit) still
 overwrites fields that Git manages, so direct changes are for trying things out;
 anything worth keeping goes into the repo. Production Applications keep
 `selfHeal: true`, and the tests check this.
+
+What "production only changes through Git" covers: workload definitions (Deployments,
+StatefulSets, Services, ConfigMaps, routes), because `tenant-editor` is never bound
+there. It does not stop operational actions: wherever `tenant-developer` or
+`tenant-admin` is bound, including production, they can exec, delete and evict pods,
+run Jobs and add debug containers, and admin can change NetworkPolicies,
+AuthorizationPolicies and SecretStores. Bind only `tenant-viewer` in production for
+groups that should not do that.
 
 ### Binding groups to namespaces and namespace wildcards
 
@@ -196,6 +204,7 @@ kube-bench run --targets node                                 # on a worker
    - `platform.example.com` (label prefix): `grep -rl platform.example.com . | xargs sed -i 's/platform.example.com/<your prefix>/g'`
    - `https://github.com/example-org/platform-gitops.git`, `example-org` repo globs and CODEOWNERS teams
    - `https://vault.example.com:8200` in the ClusterSecretStore
+   - The KV mount, if it is not `kv`: `path: kv` in the ClusterSecretStore, and `KV_MOUNT=<mount>` when running `setup.sh` and `onboard-tenant.sh` (they render it into the policies)
    - `quay.example.com` in `cis/workloads.yaml` (approved registries)
    - OIDC group names and prefix (see User profiles)
    - System namespaces excluded from the baseline audit in `cis/pod-security.yaml`
@@ -278,6 +287,7 @@ kubectl get policyreport -A; kubectl get clusterpolicyreport
 - **Egress is open.** CIS 5.3.2 is met with ingress policies; add default-deny egress once tenant egress needs are known.
 - **`clusterResourceWhitelist: []` with CreateNamespace.** Argo CD creates the namespace itself, which in current versions does not need Namespace in the project whitelist. Do not add Namespace to a tenant project: a team could then ship its own Namespace manifest and drop its Pod Security labels.
 - **New kinds for a tenant** (for example KEDA ScaledObjects) go in `extraNamespaceResources` in tenant.yaml; the chart refuses platform-only kinds.
+- **External hosts in VirtualServices** are refused (only this tenant's Services are allowed as destinations); route to external services with a platform-owned VirtualService.
 - **Hostnames are not owned.** Nothing yet stops one tenant's Ingress or HTTPRoute claiming another tenant's hostname, and tenant Certificates are limited only by the ClusterIssuer's own policy (for Vault PKI, the role's `allowed_domains`).
 - **Pods created before the ExternalSecret syncs** briefly fail to pull, then succeed on kubelet retry.
 - **Namespaces are not deleted** when an Application file is removed.

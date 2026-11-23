@@ -13,6 +13,15 @@ KV_MOUNT="${KV_MOUNT:-kv}"
 AUTH_MOUNT="${AUTH_MOUNT:-kubernetes}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
+# The policy files are written for a mount called kv; render the configured mount in.
+if [[ ! "${KV_MOUNT}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+  echo "KV_MOUNT '${KV_MOUNT}' must be a single path segment" >&2
+  exit 1
+fi
+render_policy() {
+  sed "s#^path \"kv/#path \"${KV_MOUNT}/#" "$1"
+}
+
 # KV v2 mount
 if ! vault secrets list -format=json | jq -e --arg m "${KV_MOUNT}/" 'has($m)' >/dev/null; then
   vault secrets enable -path="${KV_MOUNT}" kv-v2
@@ -29,7 +38,7 @@ vault write "auth/${AUTH_MOUNT}/config" \
   kubernetes_ca_cert=@"${K8S_CA_FILE}"
 
 # ESO policy and role, bound to the ESO ServiceAccount only
-vault policy write external-secrets "${HERE}/external-secrets.hcl"
+render_policy "${HERE}/external-secrets.hcl" | vault policy write external-secrets -
 vault write "auth/${AUTH_MOUNT}/role/external-secrets" \
   bound_service_account_names=external-secrets \
   bound_service_account_namespaces=external-secrets \
@@ -40,7 +49,7 @@ vault write "auth/${AUTH_MOUNT}/role/external-secrets" \
 # everyone gets it at login, for example:
 #   vault write auth/oidc/role/<role> token_policies="default,user-private" ...
 # (that call replaces the role's settings: read the role first and keep its values).
-vault policy write user-private "${HERE}/user-private.hcl"
+render_policy "${HERE}/user-private.hcl" | vault policy write user-private -
 
 echo "Done. Now store the shared registry credential, for example:"
 echo "  vault kv put ${KV_MOUNT}/platform/registry registry=quay.example.com username='platform+puller' password=..."

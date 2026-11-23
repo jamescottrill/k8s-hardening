@@ -8,6 +8,10 @@ metadata:
   namespace: argocd
   labels:
     platform.example.com/tenant: myapp
+  # Removing the tenant deletes its AppProject and access policy (and with it the
+  # generated RoleBindings), so former groups do not keep access.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
   annotations:
     # Before the tenant's workload Applications, which need the AppProject.
     argocd.argoproj.io/sync-wave: "-1"

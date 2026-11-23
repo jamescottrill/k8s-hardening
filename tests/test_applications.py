@@ -64,9 +64,12 @@ def test_chart_or_workload_application(tenant, path, app):
         params = {p["name"]: p["value"] for p in spec["source"]["helm"]["parameters"]}
         assert params["name"] == tenant
         assert spec["source"]["helm"]["valueFiles"] == [f"../../tenants/{tenant}/tenant.yaml"]
+        # Deleting the tenant must remove its access policy and RoleBindings.
+        assert "resources-finalizer.argocd.argoproj.io" in app["metadata"]["finalizers"]
         return
 
     values = _tenant_values(tenant)
+    assert "resources-finalizer.argocd.argoproj.io" in app["metadata"]["finalizers"]
     assert spec["project"] == tenant
     assert app["metadata"]["name"].startswith(f"{tenant}-")
     assert spec["destination"] == {"server": IN_CLUSTER, "namespace": spec["destination"]["namespace"]}
