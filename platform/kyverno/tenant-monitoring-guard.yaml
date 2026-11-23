@@ -1,0 +1,41 @@
+# Keeps tenant ServiceMonitors and PodMonitors inside their own namespace. The shared
+# Prometheus would otherwise scrape whatever a monitor's namespaceSelector names,
+# including another tenant's endpoints (any: true, or matchNames). Without a
+# namespaceSelector the Prometheus Operator only looks in the monitor's own namespace.
+#
+# Needs the Prometheus Operator CRDs; delete this file if you do not run it (Kyverno
+# refuses a policy naming a kind it does not know).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: tenant-monitoring-guard
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    policies.kyverno.io/title: Tenant monitoring guard
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/subject: ServiceMonitor, PodMonitor
+spec:
+  background: true
+  rules:
+    - name: monitors-own-namespace-only
+      match:
+        any:
+          - resources:
+              kinds: ["ServiceMonitor", "PodMonitor"]
+              operations: ["CREATE", "UPDATE"]
+              namespaceSelector:
+                matchExpressions:
+                  - key: platform.example.com/tenant
+                    operator: Exists
+      validate:
+        failureAction: Enforce
+        cel:
+          expressions:
+            - expression: >-
+                !has(object.spec.namespaceSelector)
+                || ((!has(object.spec.namespaceSelector.any) || !object.spec.namespaceSelector.any)
+                    && (!has(object.spec.namespaceSelector.matchNames)
+                        || object.spec.namespaceSelector.matchNames.all(n, n == object.metadata.namespace)))
+              message: >-
+                Tenant ServiceMonitors and PodMonitors may only select their own namespace (leave out
+                namespaceSelector).

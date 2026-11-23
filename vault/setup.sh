@@ -23,8 +23,14 @@ render_policy() {
 }
 
 # KV v2 mount
-if ! vault secrets list -format=json | jq -e --arg m "${KV_MOUNT}/" 'has($m)' >/dev/null; then
+# The policies use KV v2 paths (data/, metadata/), so an existing mount must be KV v2.
+mount_info="$(vault secrets list -format=json | jq -c --arg m "${KV_MOUNT}/" '.[$m] // empty')"
+if [[ -z "${mount_info}" ]]; then
   vault secrets enable -path="${KV_MOUNT}" kv-v2
+elif [[ "$(jq -r '.type' <<<"${mount_info}")" != "kv" || "$(jq -r '.options.version // "1"' <<<"${mount_info}")" != "2" ]]; then
+  echo "${KV_MOUNT}/ exists but is not a KV v2 mount ($(jq -r '"type=\(.type) version=\(.options.version // "1")"' <<<"${mount_info}"))." >&2
+  echo "Use another KV_MOUNT, or upgrade it: vault kv enable-versioning ${KV_MOUNT}/" >&2
+  exit 1
 fi
 
 # Kubernetes auth. With Vault outside the cluster and no token_reviewer_jwt, Vault

@@ -128,3 +128,17 @@ def test_editor_namespaces_do_not_self_heal(tenant, path, app):
         return  # editor is never bound in production
     if any(fnmatch.fnmatchcase(namespace, p) for p in _editor_patterns(tenant)):
         assert app["spec"]["syncPolicy"]["automated"]["selfHeal"] is False
+
+
+def test_last_tenant_can_be_removed():
+    """allowEmpty lets Argo CD prune the last tenant; .gitkeep keeps tenants/ in Git."""
+    (root,) = load_docs(REPO / "platform/argocd/tenants.yaml")
+    assert root["spec"]["syncPolicy"]["automated"]["allowEmpty"] is True
+    assert (TENANTS / ".gitkeep").is_file()
+
+
+def test_platform_roots_do_not_cascade():
+    """Deleting a root orphans what it manages rather than deleting guards under tenants."""
+    for path in (REPO / "bootstrap/platform-tenancy.yaml", REPO / "platform/argocd/tenants.yaml"):
+        (app,) = load_docs(path)
+        assert "finalizers" not in app["metadata"], path.name

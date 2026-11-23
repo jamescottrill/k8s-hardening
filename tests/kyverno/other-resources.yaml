@@ -261,3 +261,59 @@ spec:
   secretName: steal-tls
   literalSubject: CN=api.teamb.example.com
   issuerRef: {kind: ClusterIssuer, name: vault}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: cert-ca, namespace: myapp-dev}
+spec:
+  secretName: ca-tls
+  isCA: true
+  dnsNames: [myapp.example.com]
+  issuerRef: {kind: ClusterIssuer, name: vault}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-ipv6-dest, namespace: myapp-dev}
+spec:
+  hosts: [web]
+  http:
+    - route:
+        - destination: {host: "fd00::1234"}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-ipv6-host, namespace: myapp-dev}
+spec:
+  hosts: ["fd00::1234"]
+  http:
+    - route:
+        - destination: {host: web}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata: {name: sm-own, namespace: myapp-dev}
+spec:
+  selector: {matchLabels: {app: web}}
+  endpoints: [{port: metrics}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata: {name: sm-any, namespace: myapp-dev}
+spec:
+  namespaceSelector: {any: true}
+  selector: {matchLabels: {app: api}}
+  endpoints: [{port: metrics}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata: {name: pm-other, namespace: myapp-dev}
+spec:
+  namespaceSelector: {matchNames: [teamb-api]}
+  selector: {matchLabels: {app: api}}
+  podMetricsEndpoints: [{port: metrics}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: cluster-admin, namespace: myapp-dev}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+subjects: [{kind: ServiceAccount, name: default, namespace: myapp-dev}]

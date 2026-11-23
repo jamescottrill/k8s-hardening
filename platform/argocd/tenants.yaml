@@ -35,5 +35,8 @@ spec:
       # resources finalizer, the workloads it deployed. Namespaces are kept.
       prune: true
       selfHeal: true
+      # So removing the last tenant prunes it instead of being refused as "empty".
+      # tenants/.gitkeep keeps the directory in Git when no tenant is left.
+      allowEmpty: true
     syncOptions:
       - ServerSideApply=true

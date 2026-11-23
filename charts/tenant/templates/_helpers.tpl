@@ -26,7 +26,7 @@ Argo CD, lift quotas, or route traffic to other tenants' pods.
 */ -}}
 {{- define "tenant.namespaceResources" -}}
 {{- $forbiddenGroups := list "kyverno.io" "policies.kyverno.io" "reports.kyverno.io" "wgpolicyk8s.io" "argoproj.io" "generators.external-secrets.io" "admissionregistration.k8s.io" "apiextensions.k8s.io" -}}
-{{- $forbiddenKinds := list "Namespace" "ResourceQuota" "LimitRange" "Endpoints" "EndpointSlice" "PushSecret" "ServiceEntry" "Sidecar" "ReferenceGrant" "Pod" "DaemonSet" -}}
+{{- $forbiddenKinds := list "Namespace" "ResourceQuota" "LimitRange" "Endpoints" "EndpointSlice" "PushSecret" "ServiceEntry" "Sidecar" "ReferenceGrant" "Pod" "DaemonSet" "Gateway" "TLSRoute" "TCPRoute" "UDPRoute" "ListenerSet" "BackendTLSPolicy" -}}
 {{- $all := concat .Values.namespaceResources (.Values.extraNamespaceResources | default list) -}}
 {{- range $i, $r := $all -}}
 {{- if not (hasKey $r "group") -}}

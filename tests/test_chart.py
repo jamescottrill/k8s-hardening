@@ -87,6 +87,8 @@ def test_invalid_or_reserved_tenant_names_are_refused(name):
         ({"group": "", "kind": "Endpoints"}, "platform-only"),
         ({"group": "discovery.k8s.io", "kind": "EndpointSlice"}, "platform-only"),
         ({"group": "", "kind": "ResourceQuota"}, "platform-only"),
+        ({"group": "gateway.networking.k8s.io", "kind": "TLSRoute"}, "platform-only"),
+        ({"group": "gateway.networking.k8s.io", "kind": "Gateway"}, "platform-only"),
         ({"group": "*", "kind": "Deployment"}, "wildcards"),
         ({"group": "apps", "kind": "*"}, "wildcards"),
         ({"kind": "Thing"}, "needs a group"),

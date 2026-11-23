@@ -21,9 +21,12 @@ spec:
         any:
           - resources:
               kinds: ["ClusterRoleBinding", "RoleBinding"]
+      # Only the built-in ClusterRoleBindings, by kind as well as name: a namespaced
+      # RoleBinding called cluster-admin is still checked.
       exclude:
         any:
           - resources:
+              kinds: ["ClusterRoleBinding"]
               names: ["cluster-admin", "kubeadm:cluster-admins"]
       validate:
         failureAction: Enforce

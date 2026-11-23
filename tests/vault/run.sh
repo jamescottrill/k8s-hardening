@@ -121,6 +121,12 @@ if vault policy read user-private | grep -q '^path "secret2/data/users/'; then
 else
   fail "KV_MOUNT=secret2: user-private not rendered"
 fi
+vault secrets enable -path=kvone -version=1 kv >/dev/null
+vault secrets enable -path=notkv transit >/dev/null
+expect_refused "setup.sh refuses an existing KV v1 mount" \
+  env KV_MOUNT=kvone K8S_HOST=https://10.0.0.10:6443 K8S_CA_FILE="${work}/ca.crt" bash vault/setup.sh
+expect_refused "setup.sh refuses an existing non-KV mount" \
+  env KV_MOUNT=notkv K8S_HOST=https://10.0.0.10:6443 K8S_CA_FILE="${work}/ca.crt" bash vault/setup.sh
 expect_refused "setup.sh refuses a multi-segment KV_MOUNT" \
   env KV_MOUNT='a/b' K8S_HOST=https://10.0.0.10:6443 K8S_CA_FILE="${work}/ca.crt" bash vault/setup.sh
 

@@ -2,7 +2,7 @@
 # own. The shared gateway is allowed into every tenant namespace, so anything that makes
 # it route to another tenant's Service bypasses that tenant's default-deny.
 #
-# VirtualService destinations: a destination host must be a short name (the
+# VirtualService destinations: a destination host must be a bare Service name (the
 # VirtualService's own namespace) or <svc>.<ns>[.svc[.cluster.local]] with <ns> in the
 # same tenant, the tenant being the namespace up to its first hyphen (tenant names have
 # no hyphens). External hosts need a platform-owned VirtualService.
@@ -66,7 +66,10 @@ spec:
           variables:
             - name: tenant
               expression: "object.metadata.namespace.split('-')[0]"
-            # A host is allowed when it has no dot, or names a namespace in this tenant.
+            # A bare Service name (DNS-1123 label: not an IP literal such as fd00::1)
+            - name: serviceName
+              expression: "'^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'"
+            # A host is allowed when it is a bare Service name, or names a namespace in this tenant.
             - name: hostPattern
               expression: >-
                 '^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.' + variables.tenant
@@ -74,9 +77,9 @@ spec:
           expressions:
             - expression: >-
                 !has(object.spec.http) || object.spec.http.all(h,
-                  (!has(h.route) || h.route.all(r, !r.destination.host.contains('.') || r.destination.host.matches(variables.hostPattern)))
-                  && (!has(h.mirror) || !h.mirror.host.contains('.') || h.mirror.host.matches(variables.hostPattern))
-                  && (!has(h.mirrors) || h.mirrors.all(m, !m.destination.host.contains('.') || m.destination.host.matches(variables.hostPattern)))
+                  (!has(h.route) || h.route.all(r, r.destination.host.matches(variables.serviceName) || r.destination.host.matches(variables.hostPattern)))
+                  && (!has(h.mirror) || h.mirror.host.matches(variables.serviceName) || h.mirror.host.matches(variables.hostPattern))
+                  && (!has(h.mirrors) || h.mirrors.all(m, m.destination.host.matches(variables.serviceName) || m.destination.host.matches(variables.hostPattern)))
                   && (!has(h.delegate) || !has(h.delegate.namespace)
                       || h.delegate.namespace == variables.tenant || h.delegate.namespace.startsWith(variables.tenant + '-')))
               message: >-
@@ -84,9 +87,9 @@ spec:
                 tenant's namespaces.
             - expression: >-
                 !has(object.spec.tcp) || object.spec.tcp.all(t, !has(t.route)
-                  || t.route.all(r, !r.destination.host.contains('.') || r.destination.host.matches(variables.hostPattern)))
+                  || t.route.all(r, r.destination.host.matches(variables.serviceName) || r.destination.host.matches(variables.hostPattern)))
               message: VirtualService tcp routes may only target Services in this tenant's namespaces.
             - expression: >-
                 !has(object.spec.tls) || object.spec.tls.all(t, !has(t.route)
-                  || t.route.all(r, !r.destination.host.contains('.') || r.destination.host.matches(variables.hostPattern)))
+                  || t.route.all(r, r.destination.host.matches(variables.serviceName) || r.destination.host.matches(variables.hostPattern)))
               message: VirtualService tls routes may only target Services in this tenant's namespaces.

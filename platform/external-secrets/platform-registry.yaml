@@ -7,7 +7,9 @@ kind: ClusterExternalSecret
 metadata:
   name: platform-registry
   annotations:
-    argocd.argoproj.io/sync-wave: "0"
+    # After the wave 0 guards, so no credential is fanned out before the tenant
+    # labels it keys off are protected.
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   externalSecretName: platform-registry
   namespaceSelectors:

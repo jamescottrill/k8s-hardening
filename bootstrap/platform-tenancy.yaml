@@ -5,8 +5,10 @@ kind: Application
 metadata:
   name: platform-tenancy
   namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
+  # Deliberately no resources finaliser: cascading would delete the Kyverno guards,
+  # RBAC profiles and secret plumbing while tenant Applications (orphaned, because the
+  # tenants app-of-apps has no finaliser either) keep running without them. Deleting
+  # this Application orphans the whole platform layer instead.
   annotations:
     # Kyverno defaults fields on ClusterPolicies; server-side diff avoids false OutOfSync.
     argocd.argoproj.io/compare-options: ServerSideDiff=true

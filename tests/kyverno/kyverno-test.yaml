@@ -9,6 +9,8 @@ policies:
   - ../../platform/kyverno/tenant-namespace-guard.yaml
   - ../../platform/kyverno/restrict-cluster-secret-store.yaml
   - ../../platform/kyverno/tenant-rbac-guard.yaml
+  - ../../platform/kyverno/tenant-monitoring-guard.yaml
+  - ../../platform/kyverno/cis/rbac.yaml
   # Rendered by tests/kyverno/render.sh
   - rendered/myapp.yaml
 resources:
@@ -70,7 +72,7 @@ results:
   - policy: tenant-service-guard
     rule: virtualservice-destinations-in-tenant
     kind: VirtualService
-    resources: [vs-cross-tenant, vs-prefix-trick, vs-mirror, vs-tcp]
+    resources: [vs-cross-tenant, vs-prefix-trick, vs-mirror, vs-tcp, vs-ipv6-dest]
     result: fail
   - policy: tenant-rbac-guard
     rule: tenant-roles-least-privilege
@@ -88,5 +90,18 @@ results:
     result: pass
   - policy: tenant-hosts-myapp
     rule: hostnames-owned-by-tenant
-    resources: [ing-steal, ing-suffix-trick, ing-hostless, ing-default-backend, route-catch-all, route-empty-hostnames, vs-hijack-host, vs-wildcard-host, cert-steal, cert-literal]
+    resources: [ing-steal, ing-suffix-trick, ing-hostless, ing-default-backend, route-catch-all, route-empty-hostnames, vs-hijack-host, vs-wildcard-host, cert-steal, cert-literal, cert-ca, vs-ipv6-host]
+    result: fail
+  - policy: tenant-monitoring-guard
+    rule: monitors-own-namespace-only
+    resources: [sm-own]
+    result: pass
+  - policy: tenant-monitoring-guard
+    rule: monitors-own-namespace-only
+    resources: [sm-any, pm-other]
+    result: fail
+  - policy: cis-restrict-cluster-admin-bindings
+    rule: cluster-admin-platform-admins-only
+    kind: RoleBinding
+    resources: [cluster-admin]
     result: fail

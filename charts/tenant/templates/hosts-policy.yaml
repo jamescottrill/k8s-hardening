@@ -72,13 +72,16 @@ spec:
             - expression: >-
                 object.kind != 'VirtualService'
                 || (has(object.spec.hosts) && size(object.spec.hosts) > 0 && object.spec.hosts.all(h, h != '*'
-                    && (!h.contains('.') || h.matches(variables.internalPattern) || {{ include "tenant.ownedHost" "h" }})))
+                    && (h.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$') || h.matches(variables.internalPattern) || {{ include "tenant.ownedHost" "h" }})))
               message: >-
-                VirtualService hosts must be this tenant's own Services (a short name or
+                VirtualService hosts must be this tenant's own Services (a Service name or
                 <svc>.<tenant namespace>) or on tenant {{ $name }}'s hostnames list in tenant.yaml.
             # literalSubject sets the subject verbatim (including CN), bypassing the checks below.
             - expression: "object.kind != 'Certificate' || !has(object.spec.literalSubject)"
               message: Certificates in tenant namespaces may not use literalSubject; use dnsNames.
+            # A CA certificate would let the tenant sign any name itself.
+            - expression: "object.kind != 'Certificate' || !has(object.spec.isCA) || !object.spec.isCA"
+              message: Certificates in tenant namespaces may not be CA certificates (isCA).
             - expression: >-
                 object.kind != 'Certificate'
                 || ((!has(object.spec.dnsNames) || object.spec.dnsNames.all(h,

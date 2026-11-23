@@ -244,6 +244,8 @@ CUSTOM_KINDS = {
     "HTTPRoute": ("gateway.networking.k8s.io", "httproutes"),
     "GRPCRoute": ("gateway.networking.k8s.io", "grpcroutes"),
     "Certificate": ("cert-manager.io", "certificates"),
+    "ServiceMonitor": ("monitoring.coreos.com", "servicemonitors"),
+    "PodMonitor": ("monitoring.coreos.com", "podmonitors"),
 }
 
 
