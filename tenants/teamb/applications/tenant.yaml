@@ -1,0 +1,41 @@
+# Platform owned. Renders charts/tenant for teamb: the teamb AppProject and the Kyverno
+# policy that generates teamb's RoleBindings from tenant.yaml access:.
+# The name parameter is the tenant name and must equal this directory's name.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenant-teamb
+  namespace: argocd
+  labels:
+    platform.example.com/tenant: teamb
+  # Removing the tenant deletes its AppProject and access policy (and with it the
+  # generated RoleBindings), so former groups do not keep access.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # Before the tenant's workload Applications, which need the AppProject.
+    argocd.argoproj.io/sync-wave: "-1"
+    # Kyverno defaults fields on ClusterPolicies; server-side diff avoids false OutOfSync.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/example-org/platform-gitops.git
+    targetRevision: main
+    path: charts/tenant
+    helm:
+      valueFiles:
+        - ../../tenants/teamb/tenant.yaml
+      parameters:
+        # Parameters win over value files, so tenant.yaml cannot rename the tenant.
+        - name: name
+          value: teamb
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

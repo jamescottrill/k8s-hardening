@@ -1,0 +1,107 @@
+# Run: tests/kyverno/render.sh && kyverno test tests/kyverno   (CI: .github/workflows/test.yml)
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: tenancy-guards
+policies:
+  - ../../platform/kyverno/tenant-application-guard.yaml
+  - ../../platform/kyverno/tenant-service-guard.yaml
+  - ../../platform/kyverno/tenant-namespace-guard.yaml
+  - ../../platform/kyverno/restrict-cluster-secret-store.yaml
+  - ../../platform/kyverno/tenant-rbac-guard.yaml
+  - ../../platform/kyverno/tenant-monitoring-guard.yaml
+  - ../../platform/kyverno/cis/rbac.yaml
+  # Rendered by tests/kyverno/render.sh
+  - rendered/myapp.yaml
+resources:
+  - ../../tenants/myapp/applications/shared.yaml
+  - ../../tenants/myapp/applications/web-dev.yaml
+  - ../../tenants/myapp/applications/web-prod.yaml
+  - ../../tenants/myapp/applications/tenant.yaml
+  - ../../tenants/teamb/applications/api.yaml
+  - bad-applications.yaml
+  - other-resources.yaml
+variables: values.yaml
+results:
+  # Every real tenant Application in the repo passes
+  - policy: tenant-application-guard
+    rule: tenant-application-matches-tenant
+    kind: Application
+    resources: [myapp-shared, myapp-web-dev, myapp-web-prod, teamb-api, tenant-myapp, core-cert-manager]
+    result: pass
+  - policy: tenant-application-guard
+    rule: tenant-application-matches-tenant
+    kind: Application
+    resources: [core-unlisted, myapp-steal, myapp-mislabel, myapp-nolabels, myapp-privileged, myapp-remote, teamb-wrongproject, web]
+    result: fail
+  - policy: tenant-service-guard
+    rule: deny-externalips-and-externalname
+    kind: Service
+    resources: [hijack, intercept]
+    result: fail
+  - policy: tenant-service-guard
+    rule: deny-externalips-and-externalname
+    kind: Service
+    resources: [web-svc]
+    result: pass
+  - policy: tenant-namespace-guard
+    rule: tenant-namespace-name-prefix
+    kind: Namespace
+    resources: [myapp-x-prod, teamb-stolen]
+    result: fail
+  - policy: tenant-namespace-guard
+    rule: tenant-namespace-name-prefix
+    kind: Namespace
+    resources: [myapp-qa]
+    result: pass
+  - policy: restrict-cluster-secret-store
+    rule: deny-tenant-clustersecretstore-refs
+    kind: ExternalSecret
+    resources: [steal]
+    result: fail
+  - policy: restrict-cluster-secret-store
+    rule: deny-tenant-clustersecretstore-refs
+    kind: ExternalSecret
+    resources: [own]
+    result: pass
+  - policy: tenant-service-guard
+    rule: virtualservice-destinations-in-tenant
+    kind: VirtualService
+    resources: [vs-own]
+    result: pass
+  - policy: tenant-service-guard
+    rule: virtualservice-destinations-in-tenant
+    kind: VirtualService
+    resources: [vs-cross-tenant, vs-prefix-trick, vs-mirror, vs-tcp, vs-ipv6-dest]
+    result: fail
+  - policy: tenant-rbac-guard
+    rule: tenant-roles-least-privilege
+    kind: Role
+    resources: [endpoint-writer, policy-writer, crd-writer]
+    result: fail
+  - policy: tenant-rbac-guard
+    rule: tenant-roles-least-privilege
+    kind: Role
+    resources: [leader-election, ci-runner]
+    result: pass
+  - policy: tenant-hosts-myapp
+    rule: hostnames-owned-by-tenant
+    resources: [ing-own, route-own, route-mesh, vs-own, vs-mesh-own, cert-own]
+    result: pass
+  - policy: tenant-hosts-myapp
+    rule: hostnames-owned-by-tenant
+    resources: [ing-steal, ing-suffix-trick, ing-hostless, ing-default-backend, route-catch-all, route-empty-hostnames, vs-hijack-host, vs-wildcard-host, cert-steal, cert-literal, cert-ca, vs-ipv6-host]
+    result: fail
+  - policy: tenant-monitoring-guard
+    rule: monitors-own-namespace-only
+    resources: [sm-own]
+    result: pass
+  - policy: tenant-monitoring-guard
+    rule: monitors-own-namespace-only
+    resources: [sm-any, pm-other]
+    result: fail
+  - policy: cis-restrict-cluster-admin-bindings
+    rule: cluster-admin-platform-admins-only
+    kind: RoleBinding
+    resources: [cluster-admin]
+    result: fail

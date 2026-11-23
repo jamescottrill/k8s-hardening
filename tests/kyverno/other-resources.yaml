@@ -1,0 +1,319 @@
+apiVersion: v1
+kind: Service
+metadata: {name: hijack, namespace: myapp-dev}
+spec: {type: ExternalName, externalName: api.teamb-api.svc.cluster.local}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web-svc, namespace: myapp-dev}
+spec:
+  selector: {app: web}
+  ports: [{port: 80}]
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: myapp-x-prod
+  labels: {platform.example.com/tenant: myapp-x}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: myapp-qa
+  labels: {platform.example.com/tenant: myapp}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: teamb-stolen
+  labels: {platform.example.com/tenant: myapp}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: steal, namespace: myapp-dev}
+spec:
+  secretStoreRef: {kind: ClusterSecretStore, name: platform-vault}
+  target: {name: steal}
+  data:
+    - secretKey: password
+      remoteRef: {key: tenants/teamb/registry, property: password}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: own, namespace: myapp-dev}
+spec:
+  secretStoreRef: {kind: SecretStore, name: myapp-vault}
+  target: {name: own}
+  data:
+    - secretKey: password
+      remoteRef: {key: myapp/db, property: password}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: intercept, namespace: myapp-dev}
+spec:
+  selector: {app: web}
+  ports: [{port: 443}]
+  externalIPs: [10.0.0.10]
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-own, namespace: myapp-dev}
+spec:
+  hosts: [web.myapp.example.com]
+  gateways: [istio-system/shared]
+  http:
+    - route:
+        - destination: {host: web}
+        - destination: {host: api.myapp-prod.svc.cluster.local}
+        - destination: {host: api.myapp}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-cross-tenant, namespace: myapp-dev}
+spec:
+  hosts: [web.example.com]
+  gateways: [istio-system/shared]
+  http:
+    - route:
+        - destination: {host: api.teamb-api.svc.cluster.local}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-prefix-trick, namespace: myapp-dev}
+spec:
+  hosts: [web.example.com]
+  http:
+    - route:
+        - destination: {host: api.myappx.svc.cluster.local}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-mirror, namespace: myapp-dev}
+spec:
+  hosts: [web.example.com]
+  http:
+    - route:
+        - destination: {host: web}
+      mirror: {host: api.teamb-api.svc.cluster.local}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-tcp, namespace: myapp-dev}
+spec:
+  hosts: [db]
+  tcp:
+    - route:
+        - destination: {host: db.teamb-api}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: endpoint-writer, namespace: myapp-dev}
+rules:
+  - apiGroups: [""]
+    resources: [endpoints]
+    verbs: [create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: policy-writer, namespace: myapp-dev}
+rules:
+  - apiGroups: [kyverno.io]
+    resources: [policies]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: leader-election, namespace: myapp-dev}
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, create, update]
+  - apiGroups: [""]
+    resources: [endpoints, configmaps]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: crd-writer, namespace: myapp-dev}
+rules:
+  - apiGroups: [acme.example.com]
+    resources: [widgets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: ci-runner, namespace: myapp-dev}
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/exec, secrets]
+    verbs: [create, delete, get]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, delete]
+---
+# Hostname ownership (tenant-hosts-myapp): myapp owns myapp.example.com and *.myapp.example.com
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ing-own, namespace: myapp-dev}
+spec:
+  rules: [{host: dev.myapp.example.com}]
+  tls: [{hosts: [dev.myapp.example.com], secretName: tls}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ing-steal, namespace: myapp-dev}
+spec:
+  rules: [{host: api.teamb.example.com}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ing-suffix-trick, namespace: myapp-dev}
+spec:
+  rules: [{host: evilmyapp.example.com}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-own, namespace: myapp-dev}
+spec:
+  parentRefs: [{name: shared, namespace: istio-system}]
+  hostnames: [myapp.example.com]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-catch-all, namespace: myapp-dev}
+spec:
+  parentRefs: [{name: shared, namespace: istio-system}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-mesh, namespace: myapp-dev}
+spec:
+  parentRefs: [{group: "", kind: Service, name: web}]
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-hijack-host, namespace: myapp-dev}
+spec:
+  hosts: [api.teamb-api.svc.cluster.local]
+  http:
+    - route:
+        - destination: {host: web}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-wildcard-host, namespace: myapp-dev}
+spec:
+  hosts: ["*"]
+  http:
+    - route:
+        - destination: {host: web}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-mesh-own, namespace: myapp-dev}
+spec:
+  hosts: [web, web.myapp-dev.svc.cluster.local]
+  http:
+    - route:
+        - destination: {host: web}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: cert-own, namespace: myapp-dev}
+spec:
+  secretName: web-tls
+  dnsNames: [myapp.example.com, web.myapp-dev.svc]
+  issuerRef: {kind: ClusterIssuer, name: vault}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: cert-steal, namespace: myapp-dev}
+spec:
+  secretName: steal-tls
+  dnsNames: [api.teamb.example.com]
+  issuerRef: {kind: ClusterIssuer, name: vault}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ing-hostless, namespace: myapp-dev}
+spec:
+  rules: [{http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}]}}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ing-default-backend, namespace: myapp-dev}
+spec:
+  defaultBackend: {service: {name: web, port: {number: 80}}}
+  rules: [{host: myapp.example.com}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-empty-hostnames, namespace: myapp-dev}
+spec:
+  parentRefs: [{name: shared, namespace: istio-system}]
+  hostnames: []
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: cert-literal, namespace: myapp-dev}
+spec:
+  secretName: steal-tls
+  literalSubject: CN=api.teamb.example.com
+  issuerRef: {kind: ClusterIssuer, name: vault}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: cert-ca, namespace: myapp-dev}
+spec:
+  secretName: ca-tls
+  isCA: true
+  dnsNames: [myapp.example.com]
+  issuerRef: {kind: ClusterIssuer, name: vault}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-ipv6-dest, namespace: myapp-dev}
+spec:
+  hosts: [web]
+  http:
+    - route:
+        - destination: {host: "fd00::1234"}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-ipv6-host, namespace: myapp-dev}
+spec:
+  hosts: ["fd00::1234"]
+  http:
+    - route:
+        - destination: {host: web}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata: {name: sm-own, namespace: myapp-dev}
+spec:
+  selector: {matchLabels: {app: web}}
+  endpoints: [{port: metrics}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata: {name: sm-any, namespace: myapp-dev}
+spec:
+  namespaceSelector: {any: true}
+  selector: {matchLabels: {app: api}}
+  endpoints: [{port: metrics}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata: {name: pm-other, namespace: myapp-dev}
+spec:
+  namespaceSelector: {matchNames: [teamb-api]}
+  selector: {matchLabels: {app: api}}
+  podMetricsEndpoints: [{port: metrics}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: cluster-admin, namespace: myapp-dev}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+subjects: [{kind: ServiceAccount, name: default, namespace: myapp-dev}]

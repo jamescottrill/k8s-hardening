@@ -1,0 +1,99 @@
+# Tenant Applications are written by hand (tenants/<tenant>/applications/*.yaml, platform
+# owned). This policy catches the mistakes that would break tenancy: an Application in
+# project X that deploys outside X's namespaces, labels a namespace for another tenant,
+# or creates a namespace without the tenant and Pod Security labels (an unlabelled
+# namespace escapes every tenant policy).
+#
+# Applies to every Application whose project is not in platformProjects below, so any
+# AppProject that is not a tenant (core add-ons, the platform project) must be listed
+# there. An Application in an unlisted project is treated as a tenant Application and
+# refused unless it follows the tenant rules, which fails safe. Argo CD's own controller
+# is deliberately not excluded: the app-of-apps creates these Applications.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: tenant-application-guard
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    policies.kyverno.io/title: Tenant Application guard
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/subject: Application
+spec:
+  background: true
+  rules:
+    - name: tenant-application-matches-tenant
+      match:
+        any:
+          - resources:
+              kinds: ["argoproj.io/v1alpha1/Application"]
+              operations: ["CREATE", "UPDATE"]
+      validate:
+        failureAction: Enforce
+        cel:
+          variables:
+            - name: project
+              expression: "has(object.spec.project) ? object.spec.project : ''"
+            # Every AppProject that is not a tenant. Keep in step with your core repo.
+            - name: platformProjects
+              expression: "['platform', 'default']"
+            - name: isTenant
+              expression: "!(variables.project in variables.platformProjects)"
+            - name: tenantLabel
+              expression: >-
+                has(object.metadata.labels) && 'platform.example.com/tenant' in object.metadata.labels
+                  ? object.metadata.labels['platform.example.com/tenant'] : ''
+            - name: destNamespace
+              expression: "has(object.spec.destination.namespace) ? object.spec.destination.namespace : ''"
+            - name: nsLabels
+              expression: >-
+                has(object.spec.syncPolicy) && has(object.spec.syncPolicy.managedNamespaceMetadata)
+                  && has(object.spec.syncPolicy.managedNamespaceMetadata.labels)
+                  ? object.spec.syncPolicy.managedNamespaceMetadata.labels : {}
+            - name: syncOptions
+              expression: >-
+                has(object.spec.syncPolicy) && has(object.spec.syncPolicy.syncOptions)
+                  ? object.spec.syncPolicy.syncOptions : []
+          expressions:
+            - expression: >-
+                !variables.isTenant
+                || (variables.project.matches('^[a-z][a-z0-9]{1,30}$') && variables.tenantLabel == variables.project)
+              message: >-
+                A tenant Application's project must be a valid tenant name and its
+                platform.example.com/tenant label must equal the project.
+            - expression: "!variables.isTenant || object.metadata.name.startsWith(variables.project + '-')"
+              message: A tenant Application must be named <tenant>-<app>.
+            - expression: >-
+                !variables.isTenant
+                || (has(object.spec.destination.server) && object.spec.destination.server == 'https://kubernetes.default.svc'
+                    && !has(object.spec.destination.name))
+              message: A tenant Application must deploy to this cluster (destination.server https://kubernetes.default.svc).
+            - expression: >-
+                !variables.isTenant
+                || variables.destNamespace == variables.project
+                || variables.destNamespace.startsWith(variables.project + '-')
+              message: A tenant Application must deploy to <tenant> or a <tenant>-<name> namespace.
+            - expression: "!variables.isTenant || 'CreateNamespace=true' in variables.syncOptions"
+              message: >-
+                A tenant Application must use CreateNamespace=true, so its managedNamespaceMetadata
+                labels are applied to the namespace.
+            - expression: >-
+                !variables.isTenant
+                || ('platform.example.com/tenant' in variables.nsLabels
+                    && variables.nsLabels['platform.example.com/tenant'] == variables.project)
+              message: >-
+                managedNamespaceMetadata.labels must set platform.example.com/tenant to the
+                Application's project.
+            - expression: >-
+                !variables.isTenant
+                || ('platform.example.com/tenant-registry' in variables.nsLabels
+                    && variables.nsLabels['platform.example.com/tenant-registry'] in ['true', 'false'])
+              message: >-
+                managedNamespaceMetadata.labels must set platform.example.com/tenant-registry to
+                "true" or "false" (registry.enabled in tenant.yaml).
+            - expression: >-
+                !variables.isTenant
+                || ('pod-security.kubernetes.io/enforce' in variables.nsLabels
+                    && variables.nsLabels['pod-security.kubernetes.io/enforce'] == 'restricted')
+              message: >-
+                managedNamespaceMetadata.labels must set pod-security.kubernetes.io/enforce to
+                restricted (CIS 5.2.1).

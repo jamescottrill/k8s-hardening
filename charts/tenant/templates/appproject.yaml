@@ -1,0 +1,34 @@
+{{- $name := include "tenant.name" . -}}
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.argocdNamespace }}
+  labels:
+    platform.example.com/tenant: {{ $name | quote }}
+spec:
+  description: Tenant project for {{ $name }}
+  sourceRepos:
+    {{- required "sourceRepos must list at least one repo" .Values.sourceRepos | toYaml | nindent 4 }}
+  destinations:
+    - server: {{ .Values.destinationServer }}
+      namespace: {{ $name | quote }}
+    - server: {{ .Values.destinationServer }}
+      namespace: {{ printf "%s-*" $name | quote }}
+  # No cluster-scoped resources for tenants. Namespaces are created by Argo CD's
+  # CreateNamespace sync option on the platform-owned Applications, not by tenant manifests.
+  clusterResourceWhitelist: []
+  # Only these namespaced kinds. Anything else in a tenant repo (Kyverno policies,
+  # PolicyExceptions, Endpoints, quotas, Argo CD objects) is refused at sync time.
+  namespaceResourceWhitelist:
+    {{- include "tenant.namespaceResources" . | nindent 4 }}
+  roles:
+    - name: developers
+      description: {{ $name }} developers. Can view, sync and run actions; cannot create or edit Applications.
+      groups:
+        {{- required "owners.groups must list at least one group" .Values.owners.groups | toYaml | nindent 8 }}
+      policies:
+        - p, proj:{{ $name }}:developers, applications, get, {{ $name }}/*, allow
+        - p, proj:{{ $name }}:developers, applications, sync, {{ $name }}/*, allow
+        - p, proj:{{ $name }}:developers, applications, action/*, {{ $name }}/*, allow
+        - p, proj:{{ $name }}:developers, logs, get, {{ $name }}/*, allow

@@ -1,0 +1,83 @@
+# Set by the tenant's chart Application (tenants/<tenant>/applications/tenant.yaml) as a
+# Helm parameter, from the directory name. Never set in tenant.yaml.
+# Lowercase letters and digits only, 2 to 31 characters, no hyphens: with a hyphen,
+# tenant "myapp" would own every "myapp-x-*" namespace of a tenant called "myapp-x".
+name: ""
+
+# Git repos this tenant may deploy from. List them exactly; a glob such as
+# https://github.com/example-org/myapp-* would also match a future tenant's repos.
+sourceRepos: []
+
+owners:
+  # IdP (Keycloak) groups mapped to the tenant's Argo CD project role.
+  groups: []
+
+# Not read by this chart: the tenant's Applications carry it as the
+# platform.example.com/tenant-registry namespace label. Kept here as the record of
+# whether this tenant has its own registry credential in Vault.
+registry:
+  enabled: false
+
+# Kubernetes RBAC for OIDC groups, rendered as Kyverno-generated RoleBindings.
+#   - group: <IdP group>
+#     role: tenant-viewer | tenant-developer | tenant-editor | tenant-admin
+#     namespaces: ["<tenant>", "<tenant>-dev", "<tenant>-*"]
+access: []
+
+# External hostnames this tenant owns, exact or "*.suffix" (which owns every name
+# below the suffix). Ingresses, HTTPRoutes, GRPCRoutes, VirtualServices and
+# Certificates in the tenant's namespaces may only claim these (VirtualServices and
+# Certificates may also name the tenant's own Services). Empty: no external hostnames.
+hostnames: []
+
+# Kinds the hostname policy checks. Kyverno refuses a policy naming a kind whose CRD is
+# not installed, so drop any your cluster does not have (for example GRPCRoute).
+hostPolicyKinds: ["Ingress", "HTTPRoute", "GRPCRoute", "VirtualService", "Certificate"]
+
+# Namespaces where tenant-editor is never bound, even if an access: pattern matches
+# them, so production only changes through Git. "TENANT" is replaced by the tenant name.
+productionNamespaces:
+  - TENANT-prod
+  - TENANT-prod-*
+
+# Namespaced kinds Argo CD may apply from this tenant's repos (AppProject
+# namespaceResourceWhitelist). Anything not listed is refused at sync time.
+namespaceResources:
+  - {group: "", kind: ConfigMap}
+  - {group: "", kind: Secret}
+  - {group: "", kind: Service}
+  - {group: "", kind: ServiceAccount}
+  - {group: "", kind: PersistentVolumeClaim}
+  - {group: apps, kind: Deployment}
+  - {group: apps, kind: StatefulSet}
+  - {group: batch, kind: Job}
+  - {group: batch, kind: CronJob}
+  - {group: autoscaling, kind: HorizontalPodAutoscaler}
+  - {group: policy, kind: PodDisruptionBudget}
+  - {group: networking.k8s.io, kind: Ingress}
+  - {group: networking.k8s.io, kind: NetworkPolicy}
+  - {group: rbac.authorization.k8s.io, kind: Role}
+  - {group: rbac.authorization.k8s.io, kind: RoleBinding}
+  - {group: external-secrets.io, kind: ExternalSecret}
+  - {group: external-secrets.io, kind: SecretStore}
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute}
+  - {group: gateway.networking.k8s.io, kind: GRPCRoute}
+  - {group: networking.istio.io, kind: VirtualService}
+  - {group: networking.istio.io, kind: DestinationRule}
+  - {group: security.istio.io, kind: AuthorizationPolicy}
+  - {group: cert-manager.io, kind: Certificate}
+  - {group: monitoring.coreos.com, kind: ServiceMonitor}
+  - {group: monitoring.coreos.com, kind: PodMonitor}
+  - {group: monitoring.coreos.com, kind: PrometheusRule}
+
+# Extra kinds for one tenant, appended to namespaceResources. The chart refuses
+# wildcards and anything that would let a tenant change policy, Argo CD, quotas or
+# routing to other tenants (see templates/_helpers.tpl).
+extraNamespaceResources: []
+
+# Must match the API server's --oidc-groups-prefix (empty if you do not set one).
+# Platform-wide value: set it here rather than in tenant.yaml.
+oidcGroupPrefix: ""
+
+argocdNamespace: argocd
+destinationServer: https://kubernetes.default.svc

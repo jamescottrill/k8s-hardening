@@ -1,0 +1,42 @@
+# App-of-apps for tenants: every Application manifest under tenants/<tenant>/applications/.
+# Those files are platform owned (CODEOWNERS) and checked by tenant-application-guard,
+# which refuses any tenant Application whose project, name, destination or namespace
+# labels do not match its tenant. tenants/<tenant>/tenant.yaml is chart values, not a
+# manifest, so it is not included here.
+#
+# Deliberately no resources finaliser: deleting or recreating this one Application (by
+# mistake, or while rebuilding Argo CD) must not delete every tenant's workloads.
+# Deleting it orphans the tenant Applications, which keep running. Each tenant's chart
+# and workload Applications carry their own finalisers, so removing a tenant's files
+# still cleans up that tenant.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenants
+  namespace: argocd
+  annotations:
+    # After the Kyverno guards (wave 0) so every tenant Application is checked.
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/example-org/platform-gitops.git
+    targetRevision: main
+    path: tenants
+    directory:
+      recurse: true
+      include: "*/applications/*.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      # Removing an Application file deletes the Application and, through its
+      # resources finalizer, the workloads it deployed. Namespaces are kept.
+      prune: true
+      selfHeal: true
+      # So removing the last tenant prunes it instead of being refused as "empty".
+      # tenants/.gitkeep keeps the directory in Git when no tenant is left.
+      allowEmpty: true
+    syncOptions:
+      - ServerSideApply=true

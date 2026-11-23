@@ -1,0 +1,100 @@
+# Remaining CIS section 5 workload controls.
+---
+# CIS 5.7.4 (Level 2): the default namespace should not be used.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: cis-disallow-default-namespace
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    policies.kyverno.io/title: CIS 5.7.4 Disallow the default namespace
+    policies.kyverno.io/category: CIS 5.7
+    policies.kyverno.io/subject: Pod
+spec:
+  background: true
+  rules:
+    # Autogen extends this to Deployments, StatefulSets, Jobs and so on.
+    - name: no-workloads-in-default
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: ["default"]
+      validate:
+        failureAction: Enforce
+        message: Workloads may not run in the default namespace (CIS 5.7.4). Deploy through a tenant.
+        deny: {}
+---
+# CIS 5.4.1 (Level 2): prefer secrets as files over environment variables. Audit only,
+# as many off-the-shelf charts still use env vars; switch to Enforce when ready.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: cis-secrets-not-in-env
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    policies.kyverno.io/title: CIS 5.4.1 Secrets as files, not environment variables
+    policies.kyverno.io/category: CIS 5.4
+    policies.kyverno.io/subject: Pod
+spec:
+  background: true
+  rules:
+    - name: no-secret-env
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchExpressions:
+                  - key: platform.example.com/tenant
+                    operator: Exists
+      validate:
+        failureAction: Audit
+        cel:
+          expressions:
+            - expression: >-
+                object.spec.containers.all(c,
+                  (!has(c.env) || c.env.all(e, !(has(e.valueFrom) && has(e.valueFrom.secretKeyRef))))
+                  && (!has(c.envFrom) || c.envFrom.all(e, !has(e.secretRef))))
+                && (!has(object.spec.initContainers) || object.spec.initContainers.all(c,
+                  (!has(c.env) || c.env.all(e, !(has(e.valueFrom) && has(e.valueFrom.secretKeyRef))))
+                  && (!has(c.envFrom) || c.envFrom.all(e, !has(e.secretRef)))))
+              message: CIS 5.4.1 Mount secrets as files rather than exposing them as environment variables.
+---
+# CIS 5.5.1 (Level 2): image provenance. Tenants may only pull from approved registries.
+# Add each tenant's registry here by PR. Istio's injected proxy image must be listed if
+# you use sidecars. For signature verification add optional/kyverno/verify-images.yaml.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: cis-restrict-image-registries
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    policies.kyverno.io/title: CIS 5.5.1 Restrict image registries
+    policies.kyverno.io/category: CIS 5.5
+    policies.kyverno.io/subject: Pod
+spec:
+  background: true
+  rules:
+    - name: approved-registries
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchExpressions:
+                  - key: platform.example.com/tenant
+                    operator: Exists
+      validate:
+        failureAction: Enforce
+        message: >-
+          Images in tenant namespaces must come from an approved registry (CIS 5.5.1).
+          Ask the platform team to add yours.
+        pattern:
+          spec:
+            =(ephemeralContainers):
+              - image: "quay.example.com/* | docker.io/istio/*"
+            =(initContainers):
+              - image: "quay.example.com/* | docker.io/istio/*"
+            containers:
+              - image: "quay.example.com/* | docker.io/istio/*"

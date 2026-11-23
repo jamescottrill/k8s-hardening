@@ -1,0 +1,38 @@
+# Optional, not deployed (outside platform/). CIS 5.5.1 in its stronger form: only
+# run images signed by your CI. Needs a cosign key pair; put the public key below,
+# start in Audit, then move to Enforce once every tenant pipeline signs its images.
+# Kyverno needs pull access to the registry to read signatures (imagePullSecrets on
+# the Kyverno admission controller, or a registry credential secret referenced here).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: cis-verify-image-signatures
+  annotations:
+    policies.kyverno.io/title: CIS 5.5.1 Verify image signatures
+    policies.kyverno.io/category: CIS 5.5
+    policies.kyverno.io/subject: Pod
+spec:
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-cosign-signature
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchExpressions:
+                  - key: platform.example.com/tenant
+                    operator: Exists
+      verifyImages:
+        - imageReferences:
+            - "quay.example.com/*"
+          failureAction: Audit
+          mutateDigest: true
+          verifyDigest: true
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      REPLACE_WITH_YOUR_COSIGN_PUBLIC_KEY
+                      -----END PUBLIC KEY-----

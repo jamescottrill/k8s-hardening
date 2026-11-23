@@ -1,0 +1,81 @@
+# Kyverno's controllers aggregate ClusterRoles carrying these labels. The background
+# controller performs generate and mutate-existing rules, so it needs write access to
+# what those rules produce; the admission controller only needs to read them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:background:platform-tenancy
+  labels:
+    rbac.kyverno.io/aggregate-to-background-controller: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+rules:
+  # tenant-registry ExternalSecrets
+  - apiGroups: ["external-secrets.io"]
+    resources: ["externalsecrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # tenant access RoleBindings (generated from tenant.yaml access:)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The API server only lets Kyverno create bindings to roles it may bind. Scoped to
+  # the four tenant profiles, so Kyverno cannot hand out anything stronger.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["tenant-viewer", "tenant-developer", "tenant-editor", "tenant-admin"]
+  # Default network policies (CIS 5.3.2)
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Default ServiceAccount hardening (CIS 5.1.5)
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:admission:platform-tenancy
+  labels:
+    rbac.kyverno.io/aggregate-to-admission-controller: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+rules:
+  - apiGroups: ["external-secrets.io"]
+    resources: ["externalsecrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch"]
+---
+# Background scans (policy reports for existing resources) of the custom kinds the
+# tenancy policies check: tenant-application-guard, tenant-service-guard and each
+# tenant's tenant-hosts-<tenant> policy. tests/test_rbac.py keeps this in step.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:reports:platform-tenancy
+  labels:
+    rbac.kyverno.io/aggregate-to-reports-controller: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.istio.io"]
+    resources: ["virtualservices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes", "grpcroutes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["servicemonitors", "podmonitors"]
+    verbs: ["get", "list", "watch"]

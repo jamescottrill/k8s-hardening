@@ -1,0 +1,92 @@
+# CIS 5.3.2 (Level 2): every namespace has NetworkPolicies defined.
+#
+# Generated in each tenant namespace and kept in place (synchronize: true):
+#   default-deny-ingress      deny all ingress unless something else allows it
+#   allow-same-namespace      pods in the namespace can reach each other
+#   allow-platform-ingress    from namespaces labelled platform.example.com/allow-tenant-ingress=true
+#                             (label your Istio gateway and Prometheus namespaces)
+#
+# Egress is left open on purpose; add a default-deny-egress rule here once you know each
+# tenant's egress needs (DNS, Vault, registries, external APIs). NetworkPolicies are
+# additive, so teams can ship extra allow policies in their own repos.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: cis-tenant-network-policies
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    policies.kyverno.io/title: CIS 5.3.2 Default NetworkPolicies
+    policies.kyverno.io/category: CIS 5.3
+    policies.kyverno.io/subject: Namespace, NetworkPolicy
+spec:
+  rules:
+    - name: default-deny-ingress
+      match:
+        any:
+          - resources:
+              kinds: ["Namespace"]
+              selector:
+                matchExpressions:
+                  - key: platform.example.com/tenant
+                    operator: Exists
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: default-deny-ingress
+        namespace: "{{ request.object.metadata.name }}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes: ["Ingress"]
+
+    - name: allow-same-namespace
+      match:
+        any:
+          - resources:
+              kinds: ["Namespace"]
+              selector:
+                matchExpressions:
+                  - key: platform.example.com/tenant
+                    operator: Exists
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: allow-same-namespace
+        namespace: "{{ request.object.metadata.name }}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes: ["Ingress"]
+            ingress:
+              - from:
+                  - podSelector: {}
+
+    - name: allow-platform-ingress
+      match:
+        any:
+          - resources:
+              kinds: ["Namespace"]
+              selector:
+                matchExpressions:
+                  - key: platform.example.com/tenant
+                    operator: Exists
+      generate:
+        generateExisting: true
+        synchronize: true
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: allow-platform-ingress
+        namespace: "{{ request.object.metadata.name }}"
+        data:
+          spec:
+            podSelector: {}
+            policyTypes: ["Ingress"]
+            ingress:
+              - from:
+                  - namespaceSelector:
+                      matchLabels:
+                        platform.example.com/allow-tenant-ingress: "true"

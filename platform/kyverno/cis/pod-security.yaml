@@ -1,0 +1,59 @@
+# CIS 5.2.1 to 5.2.13, 5.7.2 (seccomp) and 5.7.3 (security contexts).
+#
+# Tenant namespaces: Pod Security Standard "restricted", enforced. This blocks
+# privileged containers, host PID/IPC/network, privilege escalation, root containers,
+# NET_RAW and any added capability, HostProcess, hostPath volumes and hostPorts, and
+# requires a RuntimeDefault or Localhost seccomp profile. (Argo CD also stamps the
+# matching Pod Security Admission labels on every tenant namespace.)
+#
+# Everything else: "baseline", audit only, so platform namespaces show up in policy
+# reports without breaking system components that legitimately need host access.
+#
+# Istio: sidecar injection without istio-cni adds an istio-init container needing
+# NET_ADMIN and NET_RAW, which restricted rejects. Use istio-cni or ambient mode.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: cis-pod-security
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    policies.kyverno.io/title: CIS 5.2 Pod Security Standards
+    policies.kyverno.io/category: CIS 5.2, CIS 5.7
+    policies.kyverno.io/subject: Pod
+spec:
+  background: true
+  rules:
+    - name: restricted-in-tenant-namespaces
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchExpressions:
+                  - key: platform.example.com/tenant
+                    operator: Exists
+      validate:
+        failureAction: Enforce
+        podSecurity:
+          level: restricted
+          version: latest
+
+    - name: baseline-audit-elsewhere
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchExpressions:
+                  - key: platform.example.com/tenant
+                    operator: DoesNotExist
+      exclude:
+        any:
+          - resources:
+              # Control plane and node-level agents that need host access by design.
+              namespaces: ["kube-system", "calico-system", "tigera-operator", "metallb-system", "gpu-operator"]
+      validate:
+        failureAction: Audit
+        podSecurity:
+          level: baseline
+          version: latest

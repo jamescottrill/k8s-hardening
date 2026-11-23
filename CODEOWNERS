@@ -1,0 +1,5 @@
+# Platform team owns everything, including every tenant's tenant.yaml and Application
+# manifests: Applications set the project, destination and namespace labels the whole
+# tenancy model relies on. Teams own their own source repos, which Argo CD syncs within
+# the limits of their AppProject.
+*                        @example-org/platform-admins

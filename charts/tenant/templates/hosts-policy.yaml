@@ -1,0 +1,93 @@
+{{- /*
+Hostname ownership for this tenant. In namespaces labelled tenant=<name>, every
+hostname an Ingress, HTTPRoute, GRPCRoute, VirtualService or Certificate claims must be
+on this tenant's hostnames: list (exact, or "*.suffix"). VirtualService hosts and
+Certificate names may also be internal: a short name, or <svc>.<ns>[.svc[.cluster.local]]
+with <ns> in this tenant.
+
+So one tenant cannot take another's external hostname at the shared gateway, or claim
+another tenant's Service name across the mesh (VirtualServices are exported mesh-wide
+by default). tests/test_chart.py checks that no two tenants list overlapping hostnames.
+*/ -}}
+{{- $name := include "tenant.name" . -}}
+{{- $hostnames := .Values.hostnames | default list -}}
+{{- range $i, $h := $hostnames }}
+{{- if not (regexMatch "^(\\*\\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$" $h) }}
+{{- fail (printf "hostnames[%d] %q must be a lowercase DNS name with at least two labels, optionally starting with *." $i $h) }}
+{{- end }}
+{{- end }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: tenant-hosts-{{ $name }}
+  labels:
+    platform.example.com/tenant: {{ $name | quote }}
+  annotations:
+    policies.kyverno.io/title: Hostnames for tenant {{ $name }}
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/subject: Ingress, HTTPRoute, GRPCRoute, VirtualService, Certificate
+spec:
+  background: true
+  rules:
+    - name: hostnames-owned-by-tenant
+      match:
+        any:
+          - resources:
+              kinds: {{ toJson .Values.hostPolicyKinds }}
+              operations: ["CREATE", "UPDATE"]
+              namespaceSelector:
+                matchLabels:
+                  platform.example.com/tenant: {{ $name | quote }}
+      validate:
+        failureAction: Enforce
+        cel:
+          variables:
+            - name: allowed
+              expression: {{ toJson $hostnames | squote }}
+            # <svc>.<namespace in this tenant>[.svc[.cluster.local]]
+            - name: internalPattern
+              expression: >-
+                '^[a-z0-9]([-a-z0-9]*[a-z0-9])?\\.' + {{ $name | squote }}
+                  + '(-[a-z0-9]([-a-z0-9]*[a-z0-9])?)?(\\.svc(\\.cluster\\.local)?)?$'
+          expressions:
+            # A rule without a host, or a defaultBackend, catches every hostname on the
+            # ingress controller, including other tenants'.
+            - expression: >-
+                object.kind != 'Ingress'
+                || (!has(object.spec.defaultBackend)
+                    && has(object.spec.rules) && size(object.spec.rules) > 0
+                    && object.spec.rules.all(r, has(r.host) && {{ include "tenant.ownedHost" "r.host" }})
+                    && (!has(object.spec.tls) || object.spec.tls.all(t, !has(t.hosts) || t.hosts.all(h, {{ include "tenant.ownedHost" "h" }}))))
+              message: >-
+                Ingresses need at least one rule, a host on every rule, no defaultBackend, and every
+                host on tenant {{ $name }}'s hostnames list in tenant.yaml.
+            - expression: >-
+                !(object.kind in ['HTTPRoute', 'GRPCRoute'])
+                || (has(object.spec.hostnames) && size(object.spec.hostnames) > 0
+                    && object.spec.hostnames.all(h, {{ include "tenant.ownedHost" "h" }}))
+                || (has(object.spec.parentRefs) && object.spec.parentRefs.all(p, has(p.kind) && p.kind == 'Service'))
+              message: >-
+                Routes attached to a Gateway must list hostnames, all on tenant {{ $name }}'s hostnames
+                list in tenant.yaml (a route without hostnames would take every hostname on the listener).
+            - expression: >-
+                object.kind != 'VirtualService'
+                || (has(object.spec.hosts) && size(object.spec.hosts) > 0 && object.spec.hosts.all(h, h != '*'
+                    && (h.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$') || h.matches(variables.internalPattern) || {{ include "tenant.ownedHost" "h" }})))
+              message: >-
+                VirtualService hosts must be this tenant's own Services (a Service name or
+                <svc>.<tenant namespace>) or on tenant {{ $name }}'s hostnames list in tenant.yaml.
+            # literalSubject sets the subject verbatim (including CN), bypassing the checks below.
+            - expression: "object.kind != 'Certificate' || !has(object.spec.literalSubject)"
+              message: Certificates in tenant namespaces may not use literalSubject; use dnsNames.
+            # A CA certificate would let the tenant sign any name itself.
+            - expression: "object.kind != 'Certificate' || !has(object.spec.isCA) || !object.spec.isCA"
+              message: Certificates in tenant namespaces may not be CA certificates (isCA).
+            - expression: >-
+                object.kind != 'Certificate'
+                || ((!has(object.spec.dnsNames) || object.spec.dnsNames.all(h,
+                       h.matches(variables.internalPattern) || {{ include "tenant.ownedHost" "h" }}))
+                    && (!has(object.spec.commonName) || object.spec.commonName.matches(variables.internalPattern)
+                       || {{ include "tenant.ownedHost" "object.spec.commonName" }}))
+              message: >-
+                Certificate names must be this tenant's own Services or on tenant {{ $name }}'s
+                hostnames list in tenant.yaml.
