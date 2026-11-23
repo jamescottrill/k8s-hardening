@@ -229,3 +229,35 @@ def test_role_guard_never_allows_routing_or_platform_kinds():
         "/serviceaccounts/token",
     ]:
         assert key not in allowed, key
+
+
+# Custom (non-core) kinds named in background-scanned tenancy policies -> (group, resource)
+CUSTOM_KINDS = {
+    "Application": ("argoproj.io", "applications"),
+    "VirtualService": ("networking.istio.io", "virtualservices"),
+    "HTTPRoute": ("gateway.networking.k8s.io", "httproutes"),
+    "GRPCRoute": ("gateway.networking.k8s.io", "grpcroutes"),
+    "Certificate": ("cert-manager.io", "certificates"),
+}
+
+
+def test_reports_controller_can_read_every_background_scanned_custom_kind():
+    import yaml
+
+    docs = load_docs(REPO / "platform/kyverno/00-rbac.yaml")
+    (reports,) = [d for d in docs if d["metadata"]["name"] == "kyverno:reports:platform-tenancy"]
+    readable = _permissions(reports["rules"])
+
+    policies = [p for f in sorted((REPO / "platform/kyverno").glob("tenant-*.yaml")) for p in load_docs(f)]
+    with open(REPO / "charts/tenant/values.yaml", encoding="utf-8") as handle:
+        host_kinds = yaml.safe_load(handle)["hostPolicyKinds"]
+    kinds = set(host_kinds)
+    for policy in policies:
+        if policy["spec"].get("background", True):
+            for rule in policy["spec"]["rules"]:
+                for clause in rule["match"].get("any", []) + rule["match"].get("all", []):
+                    kinds.update(k.split("/")[-1] for k in clause["resources"]["kinds"])
+    for kind in kinds & CUSTOM_KINDS.keys():
+        group, resource = CUSTOM_KINDS[kind]
+        for verb in ("get", "list", "watch"):
+            assert (group, resource, verb) in readable, f"reports controller cannot {verb} {resource}"

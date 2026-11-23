@@ -4,6 +4,8 @@ owners:
     - teamb-developers
 sourceRepos:
   - https://github.com/example-org/teamb-api.git
+hostnames:
+  - api.teamb.example.com
 registry:
   # teamb only pulls from the shared platform registry
   enabled: false

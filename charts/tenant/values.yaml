@@ -24,6 +24,16 @@ registry:
 #     namespaces: ["<tenant>", "<tenant>-dev", "<tenant>-*"]
 access: []
 
+# External hostnames this tenant owns, exact or "*.suffix" (which owns every name
+# below the suffix). Ingresses, HTTPRoutes, GRPCRoutes, VirtualServices and
+# Certificates in the tenant's namespaces may only claim these (VirtualServices and
+# Certificates may also name the tenant's own Services). Empty: no external hostnames.
+hostnames: []
+
+# Kinds the hostname policy checks. Kyverno refuses a policy naming a kind whose CRD is
+# not installed, so drop any your cluster does not have (for example GRPCRoute).
+hostPolicyKinds: ["Ingress", "HTTPRoute", "GRPCRoute", "VirtualService", "Certificate"]
+
 # Namespaces where tenant-editor is never bound, even if an access: pattern matches
 # them, so production only changes through Git. "TENANT" is replaced by the tenant name.
 productionNamespaces:

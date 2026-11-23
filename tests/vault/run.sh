@@ -8,14 +8,29 @@ failures=0
 pass() { echo "PASS  $*"; }
 fail() { echo "FAIL  $*"; failures=$((failures + 1)); }
 
-# expect_ok/expect_denied <description> <command...>: run as the current VAULT_TOKEN
+# expect_ok <description> <command...>: must succeed (run as the current VAULT_TOKEN).
 expect_ok() {
   local what="$1"; shift
-  if "$@" >/dev/null 2>&1; then pass "${what}"; else fail "${what} (expected success)"; fi
+  local out
+  if out="$("$@" 2>&1)"; then pass "${what}"; else fail "${what} (expected success): ${out}"; fi
 }
+# expect_denied <description> <command...>: must fail with Vault's 403, not any error,
+# so a typo, missing secret or dead server cannot make a security check pass.
 expect_denied() {
   local what="$1"; shift
-  if "$@" >/dev/null 2>&1; then fail "${what} (expected permission denied)"; else pass "${what}"; fi
+  local out
+  if out="$("$@" 2>&1)"; then
+    fail "${what} (expected permission denied)"
+  elif grep -qE 'Code: 403|permission denied' <<<"${out}"; then
+    pass "${what}"
+  else
+    fail "${what} (failed, but not with permission denied): ${out}"
+  fi
+}
+# expect_refused <description> <command...>: a script must reject its input (any failure).
+expect_refused() {
+  local what="$1"; shift
+  if "$@" >/dev/null 2>&1; then fail "${what} (expected the script to refuse)"; else pass "${what}"; fi
 }
 
 work="$(mktemp -d)"
@@ -41,9 +56,9 @@ if [[ "${alias_name}" == "Myapp Developers@corp" ]]; then
 else
   fail "alias rename (${alias_name})"
 fi
-expect_denied "onboarding refuses a globbing tenant name" \
+expect_refused "onboarding refuses a globbing tenant name" \
   env OIDC_MOUNT_ACCESSOR="${ACCESSOR}" bash vault/onboard-tenant.sh '+' g
-expect_denied "onboarding refuses a hyphenated tenant name" \
+expect_refused "onboarding refuses a hyphenated tenant name" \
   env OIDC_MOUNT_ACCESSOR="${ACCESSOR}" bash vault/onboard-tenant.sh my-app g
 
 vault kv put kv/tenants/teamb/registry password=teamb-secret >/dev/null
@@ -106,7 +121,7 @@ if vault policy read user-private | grep -q '^path "secret2/data/users/'; then
 else
   fail "KV_MOUNT=secret2: user-private not rendered"
 fi
-expect_denied "setup.sh refuses a multi-segment KV_MOUNT" \
+expect_refused "setup.sh refuses a multi-segment KV_MOUNT" \
   env KV_MOUNT='a/b' K8S_HOST=https://10.0.0.10:6443 K8S_CA_FILE="${work}/ca.crt" bash vault/setup.sh
 
 echo

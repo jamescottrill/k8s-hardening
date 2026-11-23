@@ -60,7 +60,7 @@ apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata: {name: vs-own, namespace: myapp-dev}
 spec:
-  hosts: [web.example.com]
+  hosts: [web.myapp.example.com]
   gateways: [istio-system/shared]
   http:
     - route:
@@ -151,3 +151,85 @@ rules:
   - apiGroups: [batch]
     resources: [jobs]
     verbs: [create, delete]
+---
+# Hostname ownership (tenant-hosts-myapp): myapp owns myapp.example.com and *.myapp.example.com
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ing-own, namespace: myapp-dev}
+spec:
+  rules: [{host: dev.myapp.example.com}]
+  tls: [{hosts: [dev.myapp.example.com], secretName: tls}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ing-steal, namespace: myapp-dev}
+spec:
+  rules: [{host: api.teamb.example.com}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ing-suffix-trick, namespace: myapp-dev}
+spec:
+  rules: [{host: evilmyapp.example.com}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-own, namespace: myapp-dev}
+spec:
+  parentRefs: [{name: shared, namespace: istio-system}]
+  hostnames: [myapp.example.com]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-catch-all, namespace: myapp-dev}
+spec:
+  parentRefs: [{name: shared, namespace: istio-system}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-mesh, namespace: myapp-dev}
+spec:
+  parentRefs: [{group: "", kind: Service, name: web}]
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-hijack-host, namespace: myapp-dev}
+spec:
+  hosts: [api.teamb-api.svc.cluster.local]
+  http:
+    - route:
+        - destination: {host: web}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-wildcard-host, namespace: myapp-dev}
+spec:
+  hosts: ["*"]
+  http:
+    - route:
+        - destination: {host: web}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata: {name: vs-mesh-own, namespace: myapp-dev}
+spec:
+  hosts: [web, web.myapp-dev.svc.cluster.local]
+  http:
+    - route:
+        - destination: {host: web}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: cert-own, namespace: myapp-dev}
+spec:
+  secretName: web-tls
+  dnsNames: [myapp.example.com, web.myapp-dev.svc]
+  issuerRef: {kind: ClusterIssuer, name: vault}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: cert-steal, namespace: myapp-dev}
+spec:
+  secretName: steal-tls
+  dnsNames: [api.teamb.example.com]
+  issuerRef: {kind: ClusterIssuer, name: vault}

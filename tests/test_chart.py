@@ -54,7 +54,7 @@ def test_example_tenants_render(tenant):
 def test_editor_is_never_bound_in_production():
     code, docs = render("myapp", TENANTS / "myapp" / "tenant.yaml")
     assert code == 0, docs
-    (policy,) = by_kind(docs, "ClusterPolicy")
+    (policy,) = [d for d in by_kind(docs, "ClusterPolicy") if d["metadata"]["name"] == "tenant-access-myapp"]
     editor_rules = [
         r for r in policy["spec"]["rules"]
         if r["generate"]["data"]["roleRef"]["name"] == "tenant-editor"
@@ -128,3 +128,39 @@ def test_bad_access_entries_are_refused(access, expected):
     code, err = render("myapp", overrides={**MINIMAL, "access": access})
     assert code != 0
     assert expected in err
+
+
+@pytest.mark.parametrize("bad", ["example", "*.com", "Myapp.example.com", "a..b.com", "*", "**.x.com", "x.com."])
+def test_bad_hostnames_are_refused(bad):
+    code, err = render("myapp", overrides={**MINIMAL, "hostnames": [bad]})
+    assert code != 0
+    assert "hostnames[0]" in err
+
+
+def test_hostname_policy_lists_the_tenants_hostnames():
+    code, docs = render("myapp", TENANTS / "myapp" / "tenant.yaml")
+    assert code == 0, docs
+    (policy,) = [d for d in by_kind(docs, "ClusterPolicy") if d["metadata"]["name"] == "tenant-hosts-myapp"]
+    (allowed,) = [v for v in policy["spec"]["rules"][0]["validate"]["cel"]["variables"] if v["name"] == "allowed"]
+    assert json.loads(allowed["expression"]) == ["myapp.example.com", "*.myapp.example.com"]
+
+
+def _owns(pattern, host):
+    """Same rule as the CEL: exact, or a *.suffix entry owns every name below it."""
+    return pattern == host or (pattern.startswith("*.") and host.endswith(pattern[1:]))
+
+
+def test_no_two_tenants_claim_the_same_hostnames():
+    claims = {
+        t: yaml.safe_load((TENANTS / t / "tenant.yaml").read_text()).get("hostnames", [])
+        for t in tenant_names()
+    }
+    for a, a_hosts in claims.items():
+        for b, b_hosts in claims.items():
+            if a == b:
+                continue
+            for pa in a_hosts:
+                for pb in b_hosts:
+                    # Compare the names themselves and, for wildcards, a name under them.
+                    probe = pb.replace("*", "x", 1)
+                    assert not _owns(pa, probe), f"{a} ({pa}) overlaps {b} ({pb})"

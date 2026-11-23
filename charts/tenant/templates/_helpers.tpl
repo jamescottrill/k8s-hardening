@@ -50,3 +50,12 @@ Argo CD, lift quotas, or route traffic to other tenants' pods.
   kind: {{ .kind }}
 {{- end -}}
 {{- end -}}
+
+{{- /*
+tenant.ownedHost: CEL that is true when the host expression passed in is on this
+tenant's hostnames list (variables.allowed), exactly or under a "*.suffix" entry.
+A "*.suffix" entry owns every name below the suffix.
+*/ -}}
+{{- define "tenant.ownedHost" -}}
+variables.allowed.exists(p, p == {{ . }} || (p.startsWith('*.') && {{ . }}.endsWith(p.substring(1))))
+{{- end -}}

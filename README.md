@@ -45,7 +45,8 @@ This is what stops one tenant reaching another's credentials or namespaces.
 6. **`tenant-rbac-guard`**: Argo CD applies team manifests with its own cluster-wide rights, so in tenant namespaces RoleBindings may only bind a Role to ServiceAccounts in the same namespace, and Roles may not use wildcards, bind, escalate, impersonate or create tokens, grant anything in platform-only API groups, or grant writes to the kinds the AppProject keeps out (so a repo cannot hand its own ServiceAccount what Argo CD would refuse). Human access comes only from `access:` in `tenant.yaml`.
 7. **`restrict-cluster-secret-store`**: in tenant namespaces only Kyverno and ESO may create ExternalSecrets that use a ClusterSecretStore (checked in `secretStoreRef`, `data[].sourceRef` and `dataFrom[].sourceRef`). An update that leaves `spec` unchanged, such as a force-sync annotation, is allowed. Teams can bring their own namespaced SecretStore.
 8. **`tenant-service-guard`**: no ExternalName Services and no `spec.externalIPs` (CVE-2020-8554) in tenant namespaces, and VirtualService routes, mirrors and delegates may only target the tenant's own namespaces, so a tenant cannot point the shared gateway at another tenant's Service or intercept traffic to an arbitrary IP. HTTPRoutes need a ReferenceGrant from the target namespace to cross namespaces, and tenants cannot create those.
-9. **Vault policy for ESO is read-only** and never covers `kv/users/`, so a PushSecret through `platform-vault` cannot overwrite anyone's credential and nothing in the cluster can read personal secrets.
+9. **`tenant-hosts-<tenant>`** (rendered by the tenant chart): Ingresses, HTTPRoutes, GRPCRoutes, VirtualServices and Certificates in a tenant's namespaces may only claim hostnames on that tenant's `hostnames:` list in tenant.yaml. VirtualService hosts and Certificate names may also be the tenant's own Services, never another tenant's, and Gateway routes must list hostnames. So no tenant can take another's hostname at the shared gateway, or capture another tenant's Service traffic across the mesh (VirtualServices are exported mesh-wide by default). CI checks that no two tenants list overlapping hostnames.
+10. **Vault policy for ESO is read-only** and never covers `kv/users/`, so a PushSecret through `platform-vault` cannot overwrite anyone's credential and nothing in the cluster can read personal secrets.
 
 Kyverno's own settings (for example restricting PolicyExceptions to the `kyverno` namespace) are managed with the Kyverno installation, not here.
 
@@ -183,7 +184,7 @@ kube-bench run --targets node                                 # on a worker
 | `platform/kyverno/` | Tenancy policies (namespace, Application, RBAC, Service and secret-store guards) and Kyverno RBAC. |
 | `platform/kyverno/cis/` | CIS section 5 policies. |
 | `platform/external-secrets/` | `platform-vault` ClusterSecretStore, `platform-registry` ClusterExternalSecret, TokenReview binding. |
-| `charts/tenant/` | Renders each tenant's AppProject and access ClusterPolicy; validates the tenant name, resource whitelist and access entries. |
+| `charts/tenant/` | Renders each tenant's AppProject, access ClusterPolicy and hostname policy; validates the tenant name, resource whitelist, hostnames and access entries. |
 | `tenants/<tenant>/tenant.yaml` | Chart values for one tenant. |
 | `tenants/<tenant>/applications/` | `tenant.yaml` (the chart Application) and one Application file per workload. |
 | `vault/` | ESO policy, tenant writer policy template, per-person KV policy, setup and onboarding scripts. |
@@ -222,7 +223,7 @@ Consider applying with every `failureAction: Enforce` set to `Audit` first, read
 All of this is a platform-team pull request.
 
 1. Pick a name: 2 to 31 lowercase letters and digits, starting with a letter, no hyphens, not reserved (see `charts/tenant/templates/_helpers.tpl`).
-2. Add `tenants/<tenant>/tenant.yaml` (owners, exact sourceRepos, `registry.enabled`, `access`). Add the tenant's registry to `cis-restrict-image-registries` if it is new.
+2. Add `tenants/<tenant>/tenant.yaml` (owners, exact sourceRepos, `hostnames`, `registry.enabled`, `access`). Add the tenant's registry to `cis-restrict-image-registries` if it is new.
 3. Copy `tenants/myapp/applications/tenant.yaml` to `tenants/<tenant>/applications/tenant.yaml` and change the tenant name in it.
 4. Add one Application per workload (next section).
 5. If `registry.enabled: true`: `OIDC_MOUNT_ACCESSOR=... ./vault/onboard-tenant.sh <tenant> <idp-group>`, then the team writes their own robot credential:
@@ -251,12 +252,12 @@ sourceRepos, selfHeal in production) before merge.
 
 ## What was and was not tested
 
-Run `pip install -r requirements-test.txt && pytest tests`, `kyverno test tests/kyverno` and the Vault compose test below; CI (`.github/workflows/test.yml`) runs all three plus shellcheck.
+Run `pip install -r requirements-test.txt && pytest tests`, `tests/kyverno/render.sh && kyverno test tests/kyverno` and the Vault compose test below; CI (`.github/workflows/test.yml`) runs all three plus shellcheck.
 
 - `tests/test_rbac.py` resolves the aggregated profiles and checks tier ordering, secret access, the kinds no profile may create, wildcards and escalation verbs, and that Kyverno's `bind` list and the chart's allowed roles match the profiles.
 - `tests/test_chart.py` renders the tenant chart with real `helm template` for each tenant, checks the AppProject whitelist and the production exclusion for `tenant-editor`, and checks that bad names, forbidden kinds and bad access entries fail.
 - `tests/test_applications.py` checks every Application file against its tenant.
-- `tests/kyverno/` runs `tenant-application-guard`, `tenant-service-guard`, the namespace name rule and `restrict-cluster-secret-store` on CREATE with the Kyverno CLI, against the real Application files and deliberately bad ones.
+- `tests/kyverno/` runs `tenant-application-guard`, `tenant-service-guard`, `tenant-rbac-guard`, the namespace name rule, `restrict-cluster-secret-store` and the rendered `tenant-hosts-myapp` on CREATE with the Kyverno CLI, against the real Application files and deliberately bad ones (run `tests/kyverno/render.sh` first).
 - `tests/test_cel_updates.py` evaluates the UPDATE-only rules (tenant label immutability, force-sync) with cel-python, because the Kyverno CLI cannot supply `oldObject`.
 - `tests/vault/` runs `setup.sh` and `onboard-tenant.sh` (twice) against a Vault dev server in Docker, then checks with real tokens what the tenant writer, ESO and per-person policies allow and refuse, including a non-default `KV_MOUNT`: `docker compose -f tests/vault/docker-compose.yml run --rm --build test`.
 - **Not tested on a cluster:** the generate, mutate and podSecurity rules, aggregation of the profiles, the `\{{ }}` escape, and subject-based exclusions. Check after the first sync:
@@ -289,7 +290,8 @@ kubectl get policyreport -A; kubectl get clusterpolicyreport
 - **`clusterResourceWhitelist: []` with CreateNamespace.** Argo CD creates the namespace itself, which in current versions does not need Namespace in the project whitelist. Do not add Namespace to a tenant project: a team could then ship its own Namespace manifest and drop its Pod Security labels.
 - **New kinds for a tenant** (for example KEDA ScaledObjects) go in `extraNamespaceResources` in tenant.yaml; the chart refuses platform-only kinds.
 - **External hosts in VirtualServices** are refused (only this tenant's Services are allowed as destinations); route to external services with a platform-owned VirtualService.
-- **Hostnames are not owned.** Nothing yet stops one tenant's Ingress or HTTPRoute claiming another tenant's hostname, and tenant Certificates are limited only by the ClusterIssuer's own policy (for Vault PKI, the role's `allowed_domains`).
+- **Hostnames are owned per tenant** (`hostnames:` in tenant.yaml). Certificate IP and URI SANs are not checked; keep the ClusterIssuer's own policy tight as well (for Vault PKI, the role's `allowed_domains` and `allow_ip_sans`).
+- **Kinds without a CRD.** Kyverno refuses a policy naming a kind whose CRD is not installed. Remove such kinds from `hostPolicyKinds` in `charts/tenant/values.yaml`, and drop the VirtualService rule from `tenant-service-guard` if you do not run Istio.
 - **Pods created before the ExternalSecret syncs** briefly fail to pull, then succeed on kubelet retry.
 - **Namespaces are not deleted** when an Application file is removed.
 - **Kyverno and ESO ServiceAccount names** are the Helm defaults (`kyverno/kyverno-background-controller`, `external-secrets/external-secrets`). Adjust the exclusions if yours differ.

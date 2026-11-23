@@ -12,6 +12,11 @@ sourceRepos:
   - https://github.com/example-org/myapp-web.git
   - https://github.com/example-org/myapp-shared.git
 
+# External hostnames myapp's Ingresses, routes and Certificates may use.
+hostnames:
+  - myapp.example.com
+  - "*.myapp.example.com"
+
 registry:
   # myapp has its own Quay organisation; its robot credential lives at kv/tenants/myapp/registry
   enabled: true
